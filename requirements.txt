@@ -12,6 +12,7 @@ faiss-cpu==1.9.0.post1
 
 # Financial Data
 yfinance==0.2.54
+curl_cffi>=0.5.0  # Bypass Yahoo Finance TLS fingerprint blocks
 pandas==2.2.3
 # pandas-ta==0.3.14b0  # skipped: unavailable; technical indicators implemented manually
 numpy>=1.26.4,<3.0.0  # Updated for Python 3.13 compatibility

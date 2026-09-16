@@ -10,11 +10,31 @@ from typing import Optional
 import yfinance as yf
 import numpy as np
 from langchain.tools import tool
+from curl_cffi import requests as curl_requests
 
 from backend.utils.cache import cache_get, cache_set
+from backend.utils.yfinance_disk_cache import get_cached_data, set_cached_data
 from backend.utils.validators import normalize_ticker, add_ns_suffix
 
 logger = logging.getLogger(__name__)
+
+# Global curl_cffi session with Chrome impersonation to bypass Yahoo Finance TLS fingerprint blocks
+# This session is shared across all yfinance calls to maintain cookie/crumb state
+_curl_session = None
+
+
+def _get_curl_session():
+    """
+    Get or create the shared curl_cffi session with Chrome impersonation.
+
+    This bypasses Yahoo Finance's TLS fingerprint-based blocking.
+    Do NOT wrap this in requests_cache or other session wrappers.
+    """
+    global _curl_session
+    if _curl_session is None:
+        logger.info("Creating curl_cffi session with Chrome impersonation")
+        _curl_session = curl_requests.Session(impersonate="chrome")
+    return _curl_session
 
 
 def _retry_with_backoff(func, max_retries=3, initial_delay=1.0):
@@ -86,15 +106,21 @@ def get_stock_info(ticker: str) -> dict:
         dividend yield, margins, and other fundamentals.
     """
     ticker = _ensure_ns(ticker)
-    cache_key = f"stock_info_{ticker}"
 
-    # Try cache first
+    # Try disk cache first (survives Yahoo blocks)
+    cached = get_cached_data("stock_info", ticker)
+    if cached:
+        return cached
+
+    # Try memory cache (older cache layer)
+    cache_key = f"stock_info_{ticker}"
     cached = cache_get(cache_key)
     if cached:
         return cached
 
     def _fetch():
-        stock = yf.Ticker(ticker)
+        session = _get_curl_session()
+        stock = yf.Ticker(ticker, session=session)
         info = stock.info
 
         # Check if we got valid data
@@ -140,8 +166,9 @@ def get_stock_info(ticker: str) -> dict:
             "total_cash": info.get("totalCash"),
         }
 
-        # Cache the result
+        # Cache the result (both memory and disk)
         cache_set(cache_key, result)
+        set_cached_data("stock_info", ticker, result)
         return result
 
     except Exception as e:
@@ -163,15 +190,21 @@ def get_price_history(ticker: str, period: str = "1y") -> dict:
         plus latest price, oldest price, and price return percentage.
     """
     ticker = _ensure_ns(ticker)
-    cache_key = f"price_history_{ticker}_{period}"
 
-    # Try cache first
+    # Try disk cache first
+    cached = get_cached_data("price_history", ticker, period)
+    if cached:
+        return cached
+
+    # Try memory cache
+    cache_key = f"price_history_{ticker}_{period}"
     cached = cache_get(cache_key)
     if cached:
         return cached
 
     def _fetch():
-        stock = yf.Ticker(ticker)
+        session = _get_curl_session()
+        stock = yf.Ticker(ticker, session=session)
         hist = stock.history(period=period)
 
         if hist.empty:
@@ -199,8 +232,9 @@ def get_price_history(ticker: str, period: str = "1y") -> dict:
             ),
         }
 
-        # Cache the result
+        # Cache the result (both memory and disk)
         cache_set(cache_key, result)
+        set_cached_data("price_history", ticker, result, period)
         return result
 
     except Exception as e:
@@ -219,15 +253,20 @@ def get_nifty_history(period: str = "1y") -> dict:
     Returns:
         Dict with dates and closes as lists.
     """
-    cache_key = f"nifty_{period}"
+    # Try disk cache first
+    cached = get_cached_data("nifty_history", "NSEI", period)
+    if cached:
+        return cached
 
-    # Try cache first
+    # Try memory cache
+    cache_key = f"nifty_{period}"
     cached = cache_get(cache_key)
     if cached:
         return cached
 
     def _fetch():
-        nifty = yf.Ticker("^NSEI")
+        session = _get_curl_session()
+        nifty = yf.Ticker("^NSEI", session=session)
         hist = nifty.history(period=period)
 
         if hist.empty:
@@ -244,8 +283,9 @@ def get_nifty_history(period: str = "1y") -> dict:
             "period": period,
         }
 
-        # Cache the result
+        # Cache the result (both memory and disk)
         cache_set(cache_key, result)
+        set_cached_data("nifty_history", "NSEI", result, period)
         return result
 
     except Exception as e:
