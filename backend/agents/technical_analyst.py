@@ -15,13 +15,14 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def run_technical_analyst(ticker: str, company_name: str) -> Dict[str, Any]:
+def run_technical_analyst(ticker: str, company_name: str, cached_price_history: dict = None) -> Dict[str, Any]:
     """
     Analyze technical indicators and generate trading signals.
 
     Args:
         ticker: Stock ticker symbol (e.g., "RELIANCE")
         company_name: Full company name (e.g., "Reliance Industries")
+        cached_price_history: Pre-fetched price history from workflow state (optional)
 
     Returns:
         Dict with keys:
@@ -54,8 +55,8 @@ def run_technical_analyst(ticker: str, company_name: str) -> Dict[str, Any]:
     try:
         logger.info(f"Starting technical analysis for {ticker} ({company_name})")
 
-        # Compute technical indicators
-        tech_data = compute_technical_indicators(ticker, period="1y")
+        # Compute technical indicators (pass cached price history if available)
+        tech_data = compute_technical_indicators(ticker, period="1y", cached_price_history=cached_price_history)
 
         if "error" in tech_data:
             logger.error(f"Technical indicators computation failed: {tech_data['error']}")

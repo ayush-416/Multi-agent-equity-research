@@ -51,7 +51,7 @@ def _calculate_macd(series: pd.Series, fast: int = 12, slow: int = 26, signal: i
     return macd_line, signal_line, histogram
 
 
-def compute_technical_indicators(ticker: str, period: str = "1y") -> Dict:
+def compute_technical_indicators(ticker: str, period: str = "1y", cached_price_history: dict = None) -> Dict:
     """
     Compute technical indicators for a stock ticker.
     All indicators calculated manually using pandas/numpy (no pandas-ta).
@@ -59,6 +59,7 @@ def compute_technical_indicators(ticker: str, period: str = "1y") -> Dict:
     Args:
         ticker: Stock ticker (e.g., 'RELIANCE' or 'RELIANCE.NS')
         period: Time period ('1y', '6mo', '3mo', '1mo')
+        cached_price_history: Pre-fetched price history from workflow state (optional)
 
     Returns:
         Dict with all indicators and signal summary:
@@ -75,8 +76,13 @@ def compute_technical_indicators(ticker: str, period: str = "1y") -> Dict:
     from backend.tools.financial_tools import get_price_history
 
     try:
-        # Fetch price data
-        price_data = get_price_history.func(ticker, period)
+        # Use cached price history if provided, otherwise fetch
+        if cached_price_history is not None and "error" not in cached_price_history:
+            logger.info("Using cached price history from workflow state")
+            price_data = cached_price_history
+        else:
+            logger.info("Fetching price history (cache not available)")
+            price_data = get_price_history.func(ticker, period)
 
         if "error" in price_data:
             logger.error(f"Cannot fetch price data for {ticker}: {price_data['error']}")

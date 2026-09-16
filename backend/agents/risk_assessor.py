@@ -31,7 +31,10 @@ def run_risk_assessor(
     ticker: str,
     company_name: str,
     ratio_output: Optional[Dict] = None,
-    technical_output: Optional[Dict] = None
+    technical_output: Optional[Dict] = None,
+    cached_stock_info: dict = None,
+    cached_price_history: dict = None,
+    cached_nifty_history: dict = None
 ) -> Dict[str, Any]:
     """
     Assess comprehensive financial risk for a company.
@@ -41,6 +44,9 @@ def run_risk_assessor(
         company_name: Full company name (e.g., "Reliance Industries")
         ratio_output: Optional output from ratio_cruncher agent
         technical_output: Optional output from technical_analyst agent
+        cached_stock_info: Pre-fetched stock info from workflow state (optional)
+        cached_price_history: Pre-fetched price history from workflow state (optional)
+        cached_nifty_history: Pre-fetched Nifty history from workflow state (optional)
 
     Returns:
         Dict with keys:
@@ -82,40 +88,58 @@ def run_risk_assessor(
         unavailable = []
 
         # === 1. Fetch price history ===
-        try:
-            price_data = get_price_history.func(ticker, period="1y")
-            if "error" not in price_data:
-                has_price_data = True
-                logger.info("Price data retrieved successfully")
-            else:
-                logger.warning(f"Price data unavailable: {price_data['error']}")
-        except Exception as e:
-            logger.warning(f"Failed to fetch price data: {e}")
-            price_data = {"error": str(e)}
+        if cached_price_history is not None and "error" not in cached_price_history:
+            logger.info("Using cached price history from workflow state")
+            price_data = cached_price_history
+            has_price_data = True
+        else:
+            logger.info("Fetching price history (cache not available)")
+            try:
+                price_data = get_price_history.func(ticker, period="1y")
+                if "error" not in price_data:
+                    has_price_data = True
+                    logger.info("Price data retrieved successfully")
+                else:
+                    logger.warning(f"Price data unavailable: {price_data['error']}")
+            except Exception as e:
+                logger.warning(f"Failed to fetch price data: {e}")
+                price_data = {"error": str(e)}
 
         # === 2. Fetch stock info ===
-        try:
-            stock_info = get_stock_info.func(ticker)
-            if "error" not in stock_info:
-                has_stock_info = True
-                logger.info("Stock info retrieved successfully")
-            else:
-                logger.warning(f"Stock info unavailable: {stock_info['error']}")
-        except Exception as e:
-            logger.warning(f"Failed to fetch stock info: {e}")
-            stock_info = {"error": str(e)}
+        if cached_stock_info is not None and "error" not in cached_stock_info:
+            logger.info("Using cached stock info from workflow state")
+            stock_info = cached_stock_info
+            has_stock_info = True
+        else:
+            logger.info("Fetching stock info (cache not available)")
+            try:
+                stock_info = get_stock_info.func(ticker)
+                if "error" not in stock_info:
+                    has_stock_info = True
+                    logger.info("Stock info retrieved successfully")
+                else:
+                    logger.warning(f"Stock info unavailable: {stock_info['error']}")
+            except Exception as e:
+                logger.warning(f"Failed to fetch stock info: {e}")
+                stock_info = {"error": str(e)}
 
         # === 3. Fetch Nifty history for beta ===
-        try:
-            nifty_data = get_nifty_history.func(period="1y")
-            if "error" not in nifty_data:
-                has_nifty_data = True
-                logger.info("Nifty data retrieved successfully")
-            else:
-                logger.warning(f"Nifty data unavailable: {nifty_data['error']}")
-        except Exception as e:
-            logger.warning(f"Failed to fetch Nifty data: {e}")
-            nifty_data = {"error": str(e)}
+        if cached_nifty_history is not None and "error" not in cached_nifty_history:
+            logger.info("Using cached Nifty history from workflow state")
+            nifty_data = cached_nifty_history
+            has_nifty_data = True
+        else:
+            logger.info("Fetching Nifty history (cache not available)")
+            try:
+                nifty_data = get_nifty_history.func(period="1y")
+                if "error" not in nifty_data:
+                    has_nifty_data = True
+                    logger.info("Nifty data retrieved successfully")
+                else:
+                    logger.warning(f"Nifty data unavailable: {nifty_data['error']}")
+            except Exception as e:
+                logger.warning(f"Failed to fetch Nifty data: {e}")
+                nifty_data = {"error": str(e)}
 
         # Check if we have any data
         if not (has_price_data or has_stock_info):

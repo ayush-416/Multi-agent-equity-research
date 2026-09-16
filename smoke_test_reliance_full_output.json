@@ -1,0 +1,181 @@
+{
+  "ticker": "RELIANCE.NS",
+  "company_name": "Reliance Industries",
+  "sector": "",
+  "filing_output": {
+    "status": "partial_success",
+    "ticker": "RELIANCE.NS",
+    "company_name": "Reliance Industries",
+    "filing_summary": "No indexed filings found for Reliance Industries",
+    "key_points": [],
+    "risks": [],
+    "outlook": "",
+    "sources": [],
+    "error": "No retrieved context from filings"
+  },
+  "ratio_output": {
+    "status": "success",
+    "ticker": "RELIANCE.NS",
+    "company_name": "Reliance Industries",
+    "sector": "Energy",
+    "ratios": {
+      "pe_ratio": 22.378624,
+      "forward_pe": 17.303787,
+      "pb_ratio": 1.849127,
+      "eps": 55.2,
+      "roe_pct": null,
+      "roa_pct": null,
+      "debt_to_equity": 36.653,
+      "current_ratio": null,
+      "dividend_yield_pct": 48.0,
+      "operating_margins_pct": 12.33,
+      "profit_margins_pct": 6.61,
+      "market_cap_cr": 1671666.4,
+      "revenue_cr": 1129605.0,
+      "net_income_cr": 74727.0,
+      "current_price": 1235.3,
+      "52w_high": 1611.8,
+      "52w_low": 1235.3,
+      "beta": 0.152
+    },
+    "sector_benchmarks": {
+      "pe": 12.0,
+      "pb": 1.8,
+      "roe": 14.0,
+      "roce": 16.0,
+      "de_ratio": 0.8,
+      "operating_margin": 15.0,
+      "net_margin": 8.0,
+      "current_ratio": 1.0,
+      "sales_cagr_3y": 10.0,
+      "description": "Oil & Gas, Power \u2014 Reliance, ONGC, NTPC, Tata Power, BPCL"
+    },
+    "strengths": [
+      "Low debt-to-equity ratio of 36.7",
+      "Attractive dividend yield of 48.0%"
+    ],
+    "concerns": [
+      "No major concerns identified in available ratios"
+    ],
+    "valuation_summary": "Reliance Industries is a large-cap company (\u20b91,671,666 cr). Current valuation: P/E 22.4x, P/B 1.8x. and conservative leverage.",
+    "error": null
+  },
+  "news_output": {
+    "status": "partial_success",
+    "ticker": "RELIANCE.NS",
+    "company_name": "Reliance Industries",
+    "article_count": 2,
+    "story_groups": [],
+    "confirmed_count": 0,
+    "unconfirmed_count": 0,
+    "sentiment": "UNKNOWN",
+    "sentiment_score": 0.0,
+    "key_themes": [],
+    "positive_drivers": [],
+    "negative_drivers": [],
+    "notable_headlines": [],
+    "sources": [
+      "https://news.google.com/rss/articles/CBMioAFBVV95cUxONkxYbHBWcWxRQ0FRbUhwSWswMGpCNUk2ZHp4NXhnNnBhaTFrcGQ3OXgzYzJoNmx2UVppVUZxVzZRbkNlcTlkeDkxd0RfLU5menpzZlNUX2xtRzRjWVc5UzRmdVBaeGxxU2h4OW5IUE9TdVA5cWZEZVJScVlnUkdlanFfRFBnVVhXbmV5UGZpRng2Q0tldXZHa2pIZ3cyNnhm?oc=5",
+      "https://news.google.com/rss/articles/CBMi9wFBVV95cUxQZnIzWVlUUUx6a2l1MFVFdUtneHRwMDBzcGp4dWFLQ1V6SnYxZTlUZnVwdGxtUE5YV051akUwWEozZHdUbFMtcm8tZEVaUjJkOXpDaXZHcEx5eUlsWk1PYWFSaTYtVE85cTdmMFBDUDhGT1hyTS1SOXVob3pVU05aTmc1T00yTm9ZTkQ5MGJWejNISEcyUHFlM3NjRFM2bGZJdXlVSE9VTGhtVGFRaHdVaFUyYmhRTkNaSWRCeE1YUnNKQ3ZrY25ERHpqZk9FV3hQRllqb3BRSnBOT2NQeXNCMUh0V0xnWHNVeUhSdmpsaUU2VGVHTDhj0gH8AUFVX3lxTE9EeHV3c2JGVUNzYTREeGwwaldwV3NoeGJIQWducFJ4cmRGRmd1dFpxNVRTR0paQlhOTWk0Q0g0RjNmREtBcWx0cHk1U0xCOUV0WGpfdkFMWHFjVjZ4M2V2bVBaRzhvRW1DVVFJMkRDWjYzWkV2OWRQeFU3OFhtODIycUJ1a25Vc1pXNE54TDA5R0x4Vzhkb0pHWGYzODJvbjF5OUQwb0pNdUZ4dU5aX0NTNUhoTkk3ck9UNWVSOThOTl9WTjRvdzN4cTFnQTdTUEVOcGZQUEVwLXVwSXQzZ2Zsal9sRW4tejBTNTY5b1BmVEtZcVNER0JtYWJzYQ?oc=5"
+    ],
+    "error": "No confirmed stories (all from unverified sources or single source)"
+  },
+  "technical_output": {
+    "status": "success",
+    "ticker": "RELIANCE.NS",
+    "company_name": "Reliance Industries",
+    "trend": "NEUTRAL",
+    "momentum": "NEUTRAL",
+    "technical_score": 30,
+    "indicators": {
+      "latest_price": NaN,
+      "sma_20": null,
+      "sma_50": null,
+      "sma_200": null,
+      "ema_12": 1290.6,
+      "ema_26": 1298.07,
+      "macd": -7.47,
+      "macd_signal": -3.8,
+      "macd_histogram": -3.67,
+      "rsi_14": 33.5,
+      "volume_average": 10728565,
+      "latest_volume": 13705388,
+      "price_return_pct": NaN,
+      "52w_high": 1604.38,
+      "52w_low": 1249.8
+    },
+    "signals": [
+      "MACD -7.47 below signal -3.80 (bearish momentum)",
+      "RSI 33.5 in neutral zone (30-70)",
+      "Overall: NEUTRAL trend - no clear directional bias"
+    ],
+    "support_resistance": {
+      "support_20d": 1253.0,
+      "resistance_20d": 1333.0,
+      "52w_high": 1604.38,
+      "52w_low": 1249.8
+    },
+    "summary": "Reliance Industries shows a NEUTRAL trend with NEUTRAL momentum. Technical score: 30/100. RSI at 33.5 is in neutral territory. 20-day support at $1253.00, resistance at $1333.00. 1-year return: down nan%.",
+    "error": null
+  },
+  "risk_output": {
+    "status": "success",
+    "ticker": "RELIANCE.NS",
+    "company_name": "Reliance Industries",
+    "risk_score": 21.0,
+    "risk_level": "MEDIUM",
+    "risk_factors": [
+      "Moderate volatility: 20.4%",
+      "Moderate drawdown: 20.7%",
+      "Low leverage: D/E 37",
+      "Below-average technical strength"
+    ],
+    "risk_flags": [],
+    "metrics": {
+      "volatility_pct": 20.35,
+      "var_95_pct": 2.13,
+      "max_drawdown_pct": 20.66,
+      "debt_to_equity": 36.653,
+      "pe_ratio": 22.378624,
+      "pb_ratio": 1.849127
+    },
+    "unavailable_metrics": [
+      "beta",
+      "current_ratio",
+      "altman_z_score",
+      "promoter_pledge"
+    ],
+    "summary": "Reliance Industries has a MEDIUM risk profile with a risk score of 21/100. Key metrics: volatility 20.4%, D/E 37. Identified 4 risk factors for consideration.",
+    "error": null
+  },
+  "final_report": {
+    "status": "partial_success",
+    "ticker": "RELIANCE.NS",
+    "company_name": "Reliance Industries",
+    "report_markdown": "# Investment Research Report: Reliance Industries (RELIANCE.NS)\n\n*Note: This report was generated from structured data without LLM synthesis.*\n\n## Executive Summary\nReliance Industries analysis based on available data: ROE None%, D/E 36.653. News sentiment: UNKNOWN. Technical trend: NEUTRAL. Risk level: MEDIUM.\n\n## Financial Analysis\n- **Profitability**: ROE None%, ROA None%, Net Margin None%\n- **Leverage**: D/E 36.653, Interest Coverage Nonex\n- **Liquidity**: Current Ratio None, Quick Ratio None\n- **Valuation**: P/E 22.378624, P/B 1.849127\n\n## Market Sentiment\n- **Sentiment**: UNKNOWN (score: 0.0)\n- **Articles Analyzed**: 2\n\n## Technical Analysis\n- **Trend**: NEUTRAL\n- **Momentum**: NEUTRAL\n- **Technical Score**: 30/100\n\n## Risk Assessment\n- **Risk Level**: MEDIUM\n- **Risk Score**: 21.0/100\n- **Risk Factors**:\n  - Moderate volatility: 20.4%\n  - Moderate drawdown: 20.7%\n  - Low leverage: D/E 37\n  - Below-average technical strength\n\n## Data Quality\nReport based on: ratio_analysis, news_sentiment, technical_analysis, risk_assessment\nMissing data: filing_analysis\n\n---\n*Generated by FinSight AI*",
+    "executive_summary": "Reliance Industries analysis based on available data: ROE None%, D/E 36.653. News sentiment: UNKNOWN. Technical trend: NEUTRAL. Risk level: MEDIUM.",
+    "bull_case": "Based on available data, positive factors include: ROE None%, D/E 36.653. News sentiment: UNKNOWN",
+    "bear_case": "Risk factors to consider based on available data.",
+    "key_risks": [
+      "Moderate volatility: 20.4%",
+      "Moderate drawdown: 20.7%",
+      "Low leverage: D/E 37",
+      "Below-average technical strength"
+    ],
+    "confidence_score": 80,
+    "data_quality": "4/5 data sources available (80%)",
+    "sources_used": [
+      "ratio_analysis",
+      "news_sentiment",
+      "technical_analysis",
+      "risk_assessment"
+    ],
+    "missing_sections": [
+      "filing_analysis"
+    ],
+    "error": "LLM synthesis failed, using structured data fallback"
+  },
+  "errors": [],
+  "started_at": "2026-09-15T21:36:53.613726",
+  "completed_at": "2026-09-15T21:37:47.437952"
+}

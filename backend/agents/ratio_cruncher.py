@@ -18,7 +18,8 @@ logger = logging.getLogger(__name__)
 def run_ratio_cruncher(
     ticker: str,
     company_name: str,
-    sector: str = ""
+    sector: str = "",
+    cached_stock_info: dict = None
 ) -> Dict[str, Any]:
     """
     Compute and analyze financial ratios for a company.
@@ -27,6 +28,7 @@ def run_ratio_cruncher(
         ticker: Stock ticker symbol (e.g., "RELIANCE")
         company_name: Full company name
         sector: Sector name (optional, will be fetched if not provided)
+        cached_stock_info: Pre-fetched stock info from workflow state (optional)
 
     Returns:
         Dict with keys:
@@ -57,8 +59,13 @@ def run_ratio_cruncher(
     try:
         logger.info(f"Starting ratio analysis for {ticker} ({company_name})")
 
-        # Fetch stock info
-        stock_info = get_stock_info(ticker)
+        # Use cached stock info if provided, otherwise fetch
+        if cached_stock_info is not None and "error" not in cached_stock_info:
+            logger.info("Using cached stock info from workflow state")
+            stock_info = cached_stock_info
+        else:
+            logger.info("Fetching stock info (cache not available)")
+            stock_info = get_stock_info.func(ticker)
 
         if "error" in stock_info:
             logger.error(f"Failed to fetch stock info: {stock_info['error']}")
@@ -100,7 +107,7 @@ def run_ratio_cruncher(
         sector_benchmarks = {}
         if sector:
             try:
-                benchmark_data = get_sector_median(sector)
+                benchmark_data = get_sector_median.func(sector)
                 if "error" not in benchmark_data:
                     sector_benchmarks = benchmark_data.get("medians", {})
                     result["sector_benchmarks"] = sector_benchmarks

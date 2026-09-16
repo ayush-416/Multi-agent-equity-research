@@ -1,0 +1,2 @@
+# Frontend
+gradio==5.29.1

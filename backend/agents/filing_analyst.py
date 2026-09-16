@@ -143,9 +143,11 @@ Return ONLY the JSON object, no markdown code fences or additional text."""
             if not google_api_key:
                 raise ValueError("GOOGLE_API_KEY environment variable not set")
 
-            # Use Gemini 1.5 Flash (free tier model)
+            # Use configurable model (defaults to gemini-2.5-flash for free tier)
+            model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+
             llm = ChatGoogleGenerativeAI(
-                model="gemini-1.5-flash",
+                model=model_name,
                 temperature=0,
                 google_api_key=google_api_key
             )

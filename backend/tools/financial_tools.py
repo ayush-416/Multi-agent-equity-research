@@ -5,6 +5,7 @@ All returns are JSON-serializable dicts (no pandas objects).
 All external calls use cache and handle errors gracefully.
 """
 import logging
+import time
 from typing import Optional
 import yfinance as yf
 import numpy as np
@@ -14,6 +15,47 @@ from backend.utils.cache import cache_get, cache_set
 from backend.utils.validators import normalize_ticker, add_ns_suffix
 
 logger = logging.getLogger(__name__)
+
+
+def _retry_with_backoff(func, max_retries=3, initial_delay=1.0):
+    """
+    Retry a function with exponential backoff for transient errors.
+
+    Args:
+        func: Callable to retry
+        max_retries: Maximum number of retry attempts (default: 3)
+        initial_delay: Initial delay in seconds (default: 1.0)
+
+    Returns:
+        Function result if successful
+
+    Raises:
+        Last exception if all retries fail
+    """
+    last_exception = None
+
+    for attempt in range(max_retries):
+        try:
+            return func()
+        except Exception as e:
+            last_exception = e
+            error_msg = str(e).lower()
+
+            # Check if it's a rate limit error
+            if "rate limit" in error_msg or "too many requests" in error_msg or "429" in error_msg:
+                if attempt < max_retries - 1:
+                    delay = initial_delay * (2 ** attempt)
+                    logger.warning(f"Rate limit hit, retrying in {delay}s (attempt {attempt + 1}/{max_retries})")
+                    time.sleep(delay)
+                    continue
+                else:
+                    logger.error(f"Rate limit persists after {max_retries} attempts")
+
+            # For non-rate-limit errors, don't retry
+            raise
+
+    # If we exhausted all retries
+    raise last_exception
 
 
 def _ensure_ns(ticker: str) -> str:
@@ -51,14 +93,18 @@ def get_stock_info(ticker: str) -> dict:
     if cached:
         return cached
 
-    try:
+    def _fetch():
         stock = yf.Ticker(ticker)
         info = stock.info
 
         # Check if we got valid data
         if not info or len(info) < 5:
             logger.warning(f"yfinance returned minimal data for {ticker}")
-            return {"error": "No data available from yfinance", "ticker": ticker}
+            raise ValueError("No data available from yfinance")
+        return info
+
+    try:
+        info = _retry_with_backoff(_fetch)
 
         result = {
             "ticker": ticker,
@@ -124,13 +170,17 @@ def get_price_history(ticker: str, period: str = "1y") -> dict:
     if cached:
         return cached
 
-    try:
+    def _fetch():
         stock = yf.Ticker(ticker)
         hist = stock.history(period=period)
 
         if hist.empty:
             logger.warning(f"No price data returned for {ticker}")
-            return {"error": f"No price data for {ticker}", "ticker": ticker}
+            raise ValueError(f"No price data for {ticker}")
+        return hist
+
+    try:
+        hist = _retry_with_backoff(_fetch)
 
         # Convert to JSON-serializable format
         result = {
@@ -176,13 +226,17 @@ def get_nifty_history(period: str = "1y") -> dict:
     if cached:
         return cached
 
-    try:
+    def _fetch():
         nifty = yf.Ticker("^NSEI")
         hist = nifty.history(period=period)
 
         if hist.empty:
             logger.warning(f"No Nifty data returned for period {period}")
-            return {"error": "No Nifty 50 data available", "period": period}
+            raise ValueError("No Nifty 50 data available")
+        return hist
+
+    try:
+        hist = _retry_with_backoff(_fetch)
 
         result = {
             "dates": [str(d.date()) for d in hist.index],

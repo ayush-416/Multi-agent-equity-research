@@ -1,8 +1,8 @@
 """
-Smoke test for RAG indexer with real PDFs and OpenAI API.
+Smoke test for RAG indexer with real PDFs and Google Gemini API.
 
 This requires:
-1. OPENAI_API_KEY environment variable set
+1. GOOGLE_API_KEY environment variable set
 2. At least one PDF in data/filings/<COMPANY>/ directory
 
 Run with: python -m pytest tests/smoke_test_indexer.py -v -s
@@ -16,6 +16,10 @@ from pathlib import Path
 # Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
+
+# Load environment variables
+from dotenv import load_dotenv
+load_dotenv()
 
 from backend.rag.indexer import (
     get_company_pdf_paths,
@@ -52,7 +56,7 @@ def test_smoke_get_pdf_paths():
         print(f"  - {pdf_path.name} ({pdf_path.stat().st_size} bytes)")
 
     assert isinstance(pdf_paths, list)
-    print("✓ PASSED")
+    print("PASSED")
 
 
 def test_smoke_ingest_single_company():
@@ -60,8 +64,8 @@ def test_smoke_ingest_single_company():
     print("\n=== Testing ingest_company_filings ===")
 
     # Check for API key
-    if not os.getenv("OPENAI_API_KEY"):
-        print("SKIP: OPENAI_API_KEY not set")
+    if not os.getenv("GOOGLE_API_KEY"):
+        print("SKIP: GOOGLE_API_KEY not set")
         return
 
     # Find a company with PDFs
@@ -95,7 +99,7 @@ def test_smoke_ingest_single_company():
     assert result["company"] == test_company
     assert "documents_count" in result
 
-    print(f"✓ PASSED - Indexed {result['documents_count']} documents")
+    print(f"PASSED - Indexed {result['documents_count']} documents")
 
 
 def test_smoke_ingest_all_companies():
@@ -103,8 +107,8 @@ def test_smoke_ingest_all_companies():
     print("\n=== Testing ingest_all_companies ===")
 
     # Check for API key
-    if not os.getenv("OPENAI_API_KEY"):
-        print("SKIP: OPENAI_API_KEY not set")
+    if not os.getenv("GOOGLE_API_KEY"):
+        print("SKIP: GOOGLE_API_KEY not set")
         return
 
     if not FILINGS_DIR.exists():
@@ -123,14 +127,14 @@ def test_smoke_ingest_all_companies():
     if "results" in result:
         print(f"\nPer-company results:")
         for company_result in result["results"]:
-            status = "✓" if company_result["success"] else "✗"
+            status = "OK" if company_result["success"] else "FAIL"
             print(
                 f"  {status} {company_result['company']}: "
                 f"{company_result.get('documents_count', 0)} documents"
             )
 
     assert result["success"] is True
-    print("\n✓ PASSED")
+    print("\nPASSED")
 
 
 def test_smoke_force_reindex():
@@ -138,8 +142,8 @@ def test_smoke_force_reindex():
     print("\n=== Testing force_reindex ===")
 
     # Check for API key
-    if not os.getenv("OPENAI_API_KEY"):
-        print("SKIP: OPENAI_API_KEY not set")
+    if not os.getenv("GOOGLE_API_KEY"):
+        print("SKIP: GOOGLE_API_KEY not set")
         return
 
     if not FILINGS_DIR.exists():
@@ -168,7 +172,7 @@ def test_smoke_force_reindex():
     assert result["files_processed"] > 0
     assert result["documents_count"] > 0
 
-    print(f"✓ PASSED - Reindexed {result['documents_count']} documents")
+    print(f"PASSED - Reindexed {result['documents_count']} documents")
 
 
 if __name__ == "__main__":
@@ -184,14 +188,14 @@ if __name__ == "__main__":
         test_smoke_force_reindex()
 
         print("\n" + "=" * 60)
-        print("ALL SMOKE TESTS PASSED ✓")
+        print("ALL SMOKE TESTS PASSED")
         print("=" * 60)
 
     except AssertionError as e:
-        print(f"\n✗ FAILED: {e}")
+        print(f"\nFAILED: {e}")
         sys.exit(1)
     except Exception as e:
-        print(f"\n✗ ERROR: {e}")
+        print(f"\nERROR: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

@@ -1,0 +1,20 @@
+{
+  "status": "partial_success",
+  "ticker": "RELIANCE",
+  "company_name": "Reliance Industries",
+  "article_count": 2,
+  "story_groups": [],
+  "confirmed_count": 0,
+  "unconfirmed_count": 0,
+  "sentiment": "UNKNOWN",
+  "sentiment_score": 0.0,
+  "key_themes": [],
+  "positive_drivers": [],
+  "negative_drivers": [],
+  "notable_headlines": [],
+  "sources": [
+    "https://news.google.com/rss/articles/CBMioAFBVV95cUxONkxYbHBWcWxRQ0FRbUhwSWswMGpCNUk2ZHp4NXhnNnBhaTFrcGQ3OXgzYzJoNmx2UVppVUZxVzZRbkNlcTlkeDkxd0RfLU5menpzZlNUX2xtRzRjWVc5UzRmdVBaeGxxU2h4OW5IUE9TdVA5cWZEZVJScVlnUkdlanFfRFBnVVhXbmV5UGZpRng2Q0tldXZHa2pIZ3cyNnhm?oc=5",
+    "https://news.google.com/rss/articles/CBMi9wFBVV95cUxQZnIzWVlUUUx6a2l1MFVFdUtneHRwMDBzcGp4dWFLQ1V6SnYxZTlUZnVwdGxtUE5YV051akUwWEozZHdUbFMtcm8tZEVaUjJkOXpDaXZHcEx5eUlsWk1PYWFSaTYtVE85cTdmMFBDUDhGT1hyTS1SOXVob3pVU05aTmc1T00yTm9ZTkQ5MGJWejNISEcyUHFlM3NjRFM2bGZJdXlVSE9VTGhtVGFRaHdVaFUyYmhRTkNaSWRCeE1YUnNKQ3ZrY25ERHpqZk9FV3hQRllqb3BRSnBOT2NQeXNCMUh0V0xnWHNVeUhSdmpsaUU2VGVHTDhj0gH8AUFVX3lxTE9EeHV3c2JGVUNzYTREeGwwaldwV3NoeGJIQWducFJ4cmRGRmd1dFpxNVRTR0paQlhOTWk0Q0g0RjNmREtBcWx0cHk1U0xCOUV0WGpfdkFMWHFjVjZ4M2V2bVBaRzhvRW1DVVFJMkRDWjYzWkV2OWRQeFU3OFhtODIycUJ1a25Vc1pXNE54TDA5R0x4Vzhkb0pHWGYzODJvbjF5OUQwb0pNdUZ4dU5aX0NTNUhoTkk3ck9UNWVSOThOTl9WTjRvdzN4cTFnQTdTUEVOcGZQUEVwLXVwSXQzZ2Zsal9sRW4tejBTNTY5b1BmVEtZcVNER0JtYWJzYQ?oc=5"
+  ],
+  "error": "No confirmed stories (all from unverified sources or single source)"
+}

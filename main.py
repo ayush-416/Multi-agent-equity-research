@@ -6,18 +6,45 @@ Orchestrates six specialist agents through LangGraph workflow.
 """
 
 import logging
-from typing import Optional
+import math
+import os
+from typing import Optional, Any, Dict
 from datetime import datetime
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from backend.graph.workflow import run_analysis
 
+# Load environment variables from .env file
+load_dotenv()
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+# === Helper Functions ===
+
+
+def sanitize_for_json(obj: Any) -> Any:
+    """
+    Recursively sanitize an object for JSON serialization.
+
+    Converts NaN and Infinity to None to prevent JSON encoding errors.
+    """
+    if isinstance(obj, dict):
+        return {k: sanitize_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [sanitize_for_json(item) for item in obj]
+    elif isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+    else:
+        return obj
 
 # Create FastAPI app
 app = FastAPI(
@@ -152,7 +179,10 @@ async def analyze(request: AnalysisRequest):
         logger.info(f"Errors: {len(result.get('errors', []))}")
         logger.info(f"Report generated: {result.get('final_report') is not None}")
 
-        return result
+        # Sanitize result to handle NaN/Infinity values
+        sanitized_result = sanitize_for_json(result)
+
+        return sanitized_result
 
     except ValueError as e:
         # Invalid input from workflow (e.g., ticker normalization issues)

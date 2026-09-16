@@ -8,9 +8,10 @@ No invention of financial data - only synthesis of provided information.
 import logging
 import json
 import re
+import os
 from typing import Dict, Any, Optional, List
 
-from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -253,12 +254,37 @@ def _build_context(
         context_parts.append("=== NEWS SENTIMENT ===")
         context_parts.append(f"Sentiment: {news_output.get('sentiment')} (score: {news_output.get('sentiment_score')})")
         context_parts.append(f"Articles analyzed: {news_output.get('article_count')}")
+
+        # Story group details with confirmation status
+        confirmed_count = news_output.get('confirmed_count', 0)
+        unconfirmed_count = news_output.get('unconfirmed_count', 0)
+        context_parts.append(f"Story groups: {confirmed_count} confirmed, {unconfirmed_count} unconfirmed")
+
+        # Confirmed stories (high credibility, multiple trusted sources)
+        story_groups = news_output.get('story_groups', [])
+        confirmed_stories = [g for g in story_groups if g.get('confirmed')]
+        unconfirmed_stories = [g for g in story_groups if not g.get('confirmed')]
+
+        if confirmed_stories:
+            context_parts.append("\nConfirmed Stories (≥2 trusted sources):")
+            for story in confirmed_stories[:5]:
+                context_parts.append(f"  • {story.get('summary')} [{story.get('sentiment')}] (confidence: {story.get('confidence_score')}%)")
+                context_parts.append(f"    Sources: {', '.join(story.get('trusted_sources', []))}")
+
+        if unconfirmed_stories:
+            context_parts.append("\nUnconfirmed Stories (single source or unverified):")
+            for story in unconfirmed_stories[:3]:
+                context_parts.append(f"  • {story.get('summary')} [{story.get('sentiment')}] (confidence: {story.get('confidence_score')}%)")
+                context_parts.append(f"    Sources: {', '.join(story.get('sources', []))}")
+
+        # Aggregate themes from confirmed stories
         if news_output.get('key_themes'):
-            context_parts.append(f"Key themes: {', '.join(news_output['key_themes'])}")
+            context_parts.append(f"\nKey themes (from confirmed stories): {', '.join(news_output['key_themes'][:5])}")
         if news_output.get('positive_drivers'):
-            context_parts.append(f"Positive drivers: {', '.join(news_output['positive_drivers'])}")
+            context_parts.append(f"Positive drivers: {', '.join(news_output['positive_drivers'][:3])}")
         if news_output.get('negative_drivers'):
-            context_parts.append(f"Negative drivers: {', '.join(news_output['negative_drivers'])}")
+            context_parts.append(f"Negative drivers: {', '.join(news_output['negative_drivers'][:3])}")
+
         context_parts.append("")
 
     # Technical analysis
@@ -297,9 +323,8 @@ def _generate_report_with_llm(
 
     Returns report data dict or None if generation fails.
     """
-    try:
-        # Create prompt for report generation
-        prompt = f"""You are a financial analyst writing an investment research report.
+    # Create prompt for report generation
+    prompt = f"""You are a financial analyst writing an investment research report.
 
 Based ONLY on the data provided below, synthesize a comprehensive investment research report for {company_name} ({ticker}).
 
@@ -308,6 +333,9 @@ CRITICAL RULES:
 2. If data is missing for a section, note it as "Data not available" rather than inventing
 3. Be factual and analytical - cite specific numbers from the provided data
 4. Maintain professional investment research tone
+5. IMPORTANT: For news sentiment, distinguish between CONFIRMED stories (≥2 trusted sources) and UNCONFIRMED stories (single source or unverified sources)
+6. Weight CONFIRMED news stories more heavily in your investment thesis - do NOT let a single UNCONFIRMED story swing the buy/hold/sell recommendation on its own
+7. If presenting unconfirmed stories, explicitly label them as "unconfirmed" or "single-source"
 
 DATA PROVIDED:
 {context}
@@ -328,16 +356,25 @@ Generate a structured report in JSON format with the following structure:
     "Specific risk 3 with data"
   ],
   "confidence_score": <integer 0-100, based on data completeness>,
-  "report_markdown": "# Investment Research Report: {company_name} ({ticker})\\n\\n## Executive Summary\\n[executive_summary]\\n\\n## Financial Analysis\\n[Synthesize ratio/filing data]\\n\\n## Market Position\\n[Synthesize news/sentiment]\\n\\n## Technical Outlook\\n[Synthesize technical data]\\n\\n## Risk Assessment\\n[Synthesize risk data]\\n\\n## Investment Thesis\\n### Bull Case\\n[bull_case]\\n\\n### Bear Case\\n[bear_case]\\n\\n## Key Risks\\n[List key_risks]\\n\\n## Data Quality Note\\nThis report is based on: {', '.join(sources_used)}{'. Missing: ' + ', '.join(missing_sections) if missing_sections else ''}\\n\\n---\\n*Generated by FinSight AI*"
+  "report_markdown": "# Investment Research Report: {company_name} ({ticker})\\n\\n## Executive Summary\\n[executive_summary]\\n\\n## Financial Analysis\\n[Synthesize ratio/filing data]\\n\\n## Market Position & News\\n[Synthesize news/sentiment - clearly distinguish confirmed vs unconfirmed stories]\\n\\n## Technical Outlook\\n[Synthesize technical data]\\n\\n## Risk Assessment\\n[Synthesize risk data]\\n\\n## Investment Thesis\\n### Bull Case\\n[bull_case]\\n\\n### Bear Case\\n[bear_case]\\n\\n## Key Risks\\n[List key_risks]\\n\\n## Data Quality Note\\nThis report is based on: {', '.join(sources_used)}{'. Missing: ' + ', '.join(missing_sections) if missing_sections else ''}\\n\\n---\\n*Generated by FinSight AI*"
 }}
 
 Return ONLY the JSON object, no markdown code fences or additional text."""
 
-        # Call LLM
-        llm = ChatOpenAI(
-            model="gpt-4o",
+    # Call LLM
+    try:
+        google_api_key = os.getenv("GOOGLE_API_KEY")
+        if not google_api_key:
+            raise ValueError("GOOGLE_API_KEY environment variable not set")
+
+        # Use configurable model (defaults to gemini-2.5-flash for free tier)
+        model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+
+        llm = ChatGoogleGenerativeAI(
+            model=model_name,
             temperature=0,
-            timeout=120
+            timeout=120,
+            google_api_key=google_api_key
         )
 
         logger.info("Calling LLM for report generation")
