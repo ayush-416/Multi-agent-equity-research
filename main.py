@@ -8,15 +8,26 @@ Orchestrates six specialist agents through LangGraph workflow.
 import logging
 import math
 import os
-from typing import Optional, Any, Dict
+from typing import Optional, Any, Dict, List
 from datetime import datetime
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.interval import IntervalTrigger
 
 from backend.graph.workflow import run_analysis
+from backend.utils.watchlist import (
+    get_watchlist,
+    add_to_watchlist,
+    remove_from_watchlist,
+    update_stock_status,
+    get_stock_from_watchlist
+)
+from backend.agents.news_sentinel import run_news_sentinel
+from backend.utils.alerting import should_send_alert, send_alert_email
 
 # Load environment variables from .env file
 load_dotenv()
@@ -87,6 +98,32 @@ class AnalysisRequest(BaseModel):
         }
 
 
+class WatchlistAddRequest(BaseModel):
+    """Request model for adding stock to watchlist."""
+    ticker: str = Field(..., description="Stock ticker symbol")
+    company_name: Optional[str] = Field(None, description="Full company name (optional)")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "ticker": "RELIANCE",
+                "company_name": "Reliance Industries"
+            }
+        }
+
+
+class WatchlistRemoveRequest(BaseModel):
+    """Request model for removing stock from watchlist."""
+    ticker: str = Field(..., description="Stock ticker symbol to remove")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "ticker": "RELIANCE"
+            }
+        }
+
+
 # === Endpoints ===
 
 
@@ -101,7 +138,10 @@ async def root():
         "version": "0.1.0",
         "endpoints": {
             "health": "/health",
-            "analyze": "/analyze (POST)"
+            "analyze": "/analyze (POST)",
+            "watchlist": "/watchlist (GET)",
+            "watchlist_add": "/watchlist/add (POST)",
+            "watchlist_remove": "/watchlist/remove (POST)"
         },
         "documentation": "/docs",
         "github": "https://github.com/yourusername/finsight"
@@ -201,23 +241,214 @@ async def analyze(request: AnalysisRequest):
         )
 
 
+@app.get("/watchlist")
+async def get_watchlist_endpoint():
+    """
+    Get all stocks in the watchlist.
+
+    Returns:
+        List of tracked stocks with their status
+    """
+    try:
+        watchlist = get_watchlist()
+        return {
+            "status": "success",
+            "count": len(watchlist),
+            "stocks": watchlist
+        }
+    except Exception as e:
+        logger.error(f"Failed to get watchlist: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve watchlist: {str(e)}"
+        )
+
+
+@app.post("/watchlist/add")
+async def add_to_watchlist_endpoint(request: WatchlistAddRequest):
+    """
+    Add a stock to the watchlist.
+
+    Args:
+        request: WatchlistAddRequest with ticker and optional company_name
+
+    Returns:
+        The added stock entry
+    """
+    ticker = request.ticker.strip().upper()
+    company_name = request.company_name or ticker
+
+    try:
+        stock = add_to_watchlist(ticker, company_name)
+        logger.info(f"Added {ticker} to watchlist")
+        return {
+            "status": "success",
+            "message": f"Added {ticker} to watchlist",
+            "stock": stock
+        }
+    except Exception as e:
+        logger.error(f"Failed to add {ticker} to watchlist: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to add to watchlist: {str(e)}"
+        )
+
+
+@app.post("/watchlist/remove")
+async def remove_from_watchlist_endpoint(request: WatchlistRemoveRequest):
+    """
+    Remove a stock from the watchlist.
+
+    Args:
+        request: WatchlistRemoveRequest with ticker
+
+    Returns:
+        Success status
+    """
+    ticker = request.ticker.strip().upper()
+
+    try:
+        removed = remove_from_watchlist(ticker)
+        if removed:
+            logger.info(f"Removed {ticker} from watchlist")
+            return {
+                "status": "success",
+                "message": f"Removed {ticker} from watchlist"
+            }
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Stock {ticker} not found in watchlist"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to remove {ticker} from watchlist: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to remove from watchlist: {str(e)}"
+        )
+
+
+# === Background Scheduler ===
+
+# Create scheduler
+scheduler = AsyncIOScheduler()
+
+
+async def check_watchlist_stocks():
+    """
+    Background job: Check all watchlist stocks for news updates.
+
+    Runs every 10 minutes. For each stock, runs News Sentinel agent
+    and sends alerts if confirmed negative news is found.
+    """
+    logger.info("Starting watchlist check...")
+
+    try:
+        watchlist = get_watchlist()
+
+        if not watchlist:
+            logger.info("Watchlist is empty, nothing to check")
+            return
+
+        logger.info(f"Checking {len(watchlist)} stocks in watchlist")
+
+        for stock in watchlist:
+            ticker = stock["ticker"]
+            company_name = stock["company_name"]
+            seen_story_ids = stock.get("seen_story_ids", [])
+
+            logger.info(f"Checking news for {ticker}...")
+
+            try:
+                # Run News Sentinel agent (lightweight check)
+                news_result = run_news_sentinel(ticker, company_name)
+
+                if news_result.get("status") in ["success", "partial_success"]:
+                    story_groups = news_result.get("story_groups", [])
+                    sentiment = news_result.get("sentiment", "neutral")
+                    article_count = news_result.get("article_count", 0)
+
+                    # Check if we should alert
+                    should_alert, new_negative_stories, all_story_ids = should_send_alert(
+                        story_groups, seen_story_ids
+                    )
+
+                    # Count confirmed negatives
+                    confirmed_negative_count = len([
+                        s for s in story_groups
+                        if s.get("confirmed") and s.get("sentiment", "").lower() in ["negative", "bearish"]
+                    ])
+
+                    # Update stock status
+                    update_stock_status(
+                        ticker=ticker,
+                        last_check_at=datetime.utcnow().isoformat(),
+                        last_sentiment=sentiment,
+                        last_story_count=len(story_groups),
+                        confirmed_negative_count=confirmed_negative_count,
+                        seen_story_ids=all_story_ids
+                    )
+
+                    # Send alert if needed
+                    if should_alert:
+                        logger.warning(f"ALERT: {len(new_negative_stories)} new confirmed negative stories for {ticker}")
+                        send_alert_email(ticker, company_name, new_negative_stories)
+                    else:
+                        logger.info(f"No new alerts for {ticker} (checked {article_count} articles)")
+
+                else:
+                    logger.warning(f"News check failed for {ticker}: {news_result.get('error')}")
+
+            except Exception as e:
+                logger.error(f"Error checking {ticker}: {e}", exc_info=True)
+                continue
+
+        logger.info("Watchlist check complete")
+
+    except Exception as e:
+        logger.error(f"Watchlist check failed: {e}", exc_info=True)
+
+
 # === Application Lifecycle ===
 
 
 @app.on_event("startup")
 async def startup_event():
-    """Log application startup."""
+    """Start application and background scheduler."""
     logger.info("=" * 60)
     logger.info("FinSight AI - Starting up")
     logger.info("Multi-agent equity research platform")
     logger.info("Version: 0.1.0")
     logger.info("=" * 60)
 
+    # Start background scheduler
+    try:
+        scheduler.add_job(
+            check_watchlist_stocks,
+            trigger=IntervalTrigger(minutes=10),
+            id="watchlist_checker",
+            name="Check watchlist for news updates",
+            replace_existing=True
+        )
+        scheduler.start()
+        logger.info("✓ Background scheduler started - checking watchlist every 10 minutes")
+    except Exception as e:
+        logger.error(f"Failed to start scheduler: {e}", exc_info=True)
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Log application shutdown."""
+    """Shutdown application and stop scheduler."""
     logger.info("FinSight AI - Shutting down")
+
+    # Stop scheduler
+    try:
+        scheduler.shutdown()
+        logger.info("✓ Background scheduler stopped")
+    except Exception as e:
+        logger.error(f"Error stopping scheduler: {e}")
 
 
 # === Run Server ===

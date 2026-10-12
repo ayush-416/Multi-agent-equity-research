@@ -15,6 +15,9 @@ from typing import Dict, Any, Optional, Tuple
 API_BASE_URL = "http://localhost:8000"
 API_ANALYZE_URL = f"{API_BASE_URL}/analyze"
 API_HEALTH_URL = f"{API_BASE_URL}/health"
+API_WATCHLIST_URL = f"{API_BASE_URL}/watchlist"
+API_WATCHLIST_ADD_URL = f"{API_BASE_URL}/watchlist/add"
+API_WATCHLIST_REMOVE_URL = f"{API_BASE_URL}/watchlist/remove"
 
 
 # === Helper Functions ===
@@ -354,6 +357,143 @@ Please check:
         return error_msg, error_msg, error_msg, error_msg, error_msg, error_msg, error_msg
 
 
+def get_watchlist_display() -> str:
+    """
+    Fetch and format watchlist for display.
+
+    Returns:
+        Markdown-formatted watchlist
+    """
+    try:
+        response = requests.get(API_WATCHLIST_URL, timeout=5)
+
+        if response.status_code != 200:
+            return f"# ⚠️ Error\n\nFailed to fetch watchlist: {response.status_code}"
+
+        data = response.json()
+        stocks = data.get("stocks", [])
+
+        if not stocks:
+            return """# 📋 Watchlist
+
+No stocks in watchlist yet. Add one below to start tracking!"""
+
+        # Build table
+        display = "# 📋 Watchlist\n\n"
+        display += f"**Tracking {len(stocks)} stock(s)**\n\n"
+        display += "| Ticker | Company | Last Check | Sentiment | Stories | Alerts |\n"
+        display += "|--------|---------|------------|-----------|---------|--------|\n"
+
+        for stock in stocks:
+            ticker = stock.get("ticker", "N/A")
+            company = stock.get("company_name", "N/A")
+            last_check = stock.get("last_check_at")
+            sentiment = stock.get("last_sentiment", "N/A")
+            story_count = stock.get("last_story_count", 0)
+            negative_count = stock.get("confirmed_negative_count", 0)
+
+            # Format last check time
+            if last_check:
+                from datetime import datetime
+                try:
+                    dt = datetime.fromisoformat(last_check.replace('Z', '+00:00'))
+                    last_check_str = dt.strftime("%Y-%m-%d %H:%M")
+                except:
+                    last_check_str = "N/A"
+            else:
+                last_check_str = "Never"
+
+            # Color sentiment
+            if sentiment:
+                sentiment_upper = sentiment.upper()
+                if "NEGATIVE" in sentiment_upper or "BEARISH" in sentiment_upper:
+                    sentiment_display = f"🔴 {sentiment}"
+                elif "POSITIVE" in sentiment_upper or "BULLISH" in sentiment_upper:
+                    sentiment_display = f"🟢 {sentiment}"
+                else:
+                    sentiment_display = f"⚪ {sentiment}"
+            else:
+                sentiment_display = "N/A"
+
+            # Alert indicator
+            alert_display = f"⚠️ {negative_count}" if negative_count > 0 else "-"
+
+            display += f"| {ticker} | {company} | {last_check_str} | {sentiment_display} | {story_count} | {alert_display} |\n"
+
+        display += "\n---\n\n"
+        display += "**Note**: Watchlist is checked every 10 minutes. Alerts are sent for new confirmed negative news.\n"
+
+        return display
+
+    except Exception as e:
+        return f"# ⚠️ Error\n\nFailed to fetch watchlist: {str(e)}"
+
+
+def add_to_watchlist_action(ticker: str, company_name: str) -> tuple:
+    """
+    Add a stock to the watchlist.
+
+    Returns:
+        Tuple of (updated_watchlist_display, status_message, cleared_ticker_input)
+    """
+    if not ticker or not ticker.strip():
+        return get_watchlist_display(), "⚠️ Please enter a ticker symbol", ""
+
+    try:
+        payload = {
+            "ticker": ticker.strip().upper(),
+            "company_name": company_name.strip() if company_name else None
+        }
+
+        response = requests.post(API_WATCHLIST_ADD_URL, json=payload, timeout=5)
+
+        if response.status_code == 200:
+            data = response.json()
+            message = f"✅ Added {ticker.upper()} to watchlist"
+        else:
+            error_detail = response.json().get("detail", "Unknown error")
+            message = f"❌ Failed to add: {error_detail}"
+
+        return get_watchlist_display(), message, ""
+
+    except Exception as e:
+        return get_watchlist_display(), f"❌ Error: {str(e)}", ticker
+
+
+def remove_from_watchlist_action(ticker: str) -> tuple:
+    """
+    Remove a stock from the watchlist.
+
+    Returns:
+        Tuple of (updated_watchlist_display, status_message)
+    """
+    if not ticker or not ticker.strip():
+        return get_watchlist_display(), "⚠️ Please enter a ticker symbol to remove"
+
+    try:
+        payload = {"ticker": ticker.strip().upper()}
+
+        response = requests.post(API_WATCHLIST_REMOVE_URL, json=payload, timeout=5)
+
+        if response.status_code == 200:
+            message = f"✅ Removed {ticker.upper()} from watchlist"
+        elif response.status_code == 404:
+            message = f"⚠️ {ticker.upper()} not found in watchlist"
+        else:
+            error_detail = response.json().get("detail", "Unknown error")
+            message = f"❌ Failed to remove: {error_detail}"
+
+        return get_watchlist_display(), message
+
+    except Exception as e:
+        return get_watchlist_display(), f"❌ Error: {str(e)}"
+
+
+def refresh_watchlist_action() -> str:
+    """Refresh the watchlist display."""
+    return get_watchlist_display()
+
+
 # === Example Stock Presets ===
 
 EXAMPLE_STOCKS = {
@@ -494,6 +634,55 @@ def create_interface():
                             line_breaks=True
                         )
 
+                    with gr.Tab("📊 Tracking"):
+                        gr.Markdown("""
+                        ### Stock Watchlist
+
+                        Add stocks to track and receive email alerts when confirmed negative news is detected.
+
+                        **Alert Criteria:**
+                        - ✅ Confirmed (≥2 trusted sources)
+                        - ✅ Negative sentiment
+                        - ✅ New story (not previously seen)
+
+                        Watchlist is checked every 10 minutes automatically.
+                        """)
+
+                        watchlist_display = gr.Markdown(
+                            get_watchlist_display(),
+                            line_breaks=True
+                        )
+
+                        with gr.Row():
+                            refresh_btn = gr.Button("🔄 Refresh", size="sm")
+
+                        gr.Markdown("### Add Stock to Watchlist")
+
+                        with gr.Row():
+                            add_ticker_input = gr.Textbox(
+                                label="Ticker Symbol",
+                                placeholder="e.g., RELIANCE",
+                                scale=2
+                            )
+                            add_company_input = gr.Textbox(
+                                label="Company Name (optional)",
+                                placeholder="e.g., Reliance Industries",
+                                scale=3
+                            )
+
+                        add_btn = gr.Button("➕ Add to Watchlist", variant="primary")
+
+                        gr.Markdown("### Remove Stock from Watchlist")
+
+                        with gr.Row():
+                            remove_ticker_input = gr.Textbox(
+                                label="Ticker Symbol to Remove",
+                                placeholder="e.g., RELIANCE"
+                            )
+                            remove_btn = gr.Button("➖ Remove", variant="stop")
+
+                        status_message = gr.Markdown("")
+
         # Wire up analyze button
         analyze_btn.click(
             fn=analyze_stock,
@@ -520,6 +709,25 @@ def create_interface():
                 inputs=None,
                 outputs=[ticker_input, company_name_input, sector_input]
             )
+
+        # Wire up watchlist actions
+        refresh_btn.click(
+            fn=refresh_watchlist_action,
+            inputs=None,
+            outputs=[watchlist_display]
+        )
+
+        add_btn.click(
+            fn=add_to_watchlist_action,
+            inputs=[add_ticker_input, add_company_input],
+            outputs=[watchlist_display, status_message, add_ticker_input]
+        )
+
+        remove_btn.click(
+            fn=remove_from_watchlist_action,
+            inputs=[remove_ticker_input],
+            outputs=[watchlist_display, status_message]
+        )
 
     return demo
 

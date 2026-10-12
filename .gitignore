@@ -77,3 +77,6 @@ data/filings/*/*.pdf
 # Keep directory structure
 !data/filings/.gitkeep
 !data/vector_store/.gitkeep
+
+data/yfinance_cache/
+backend/data/seen_stories_*.json
