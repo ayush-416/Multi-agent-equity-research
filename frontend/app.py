@@ -368,21 +368,41 @@ def get_watchlist_display() -> str:
         response = requests.get(API_WATCHLIST_URL, timeout=5)
 
         if response.status_code != 200:
-            return f"# ⚠️ Error\n\nFailed to fetch watchlist: {response.status_code}"
+            return f"""<div style="text-align: center; padding: 2rem; background: #f8d7da; border-radius: 8px; border: 1px solid #f5c6cb;">
+                <h2 style="color: #721c24;">⚠️ Error</h2>
+                <p style="color: #555;">Failed to fetch watchlist: {response.status_code}</p>
+            </div>"""
 
         data = response.json()
         stocks = data.get("stocks", [])
 
         if not stocks:
-            return """# 📋 Watchlist
-
-No stocks in watchlist yet. Add one below to start tracking!"""
+            return """<div style="text-align: center; padding: 3rem; background: #f0f0f0; border-radius: 8px; border: 1px dashed #999;">
+                <h2 style="color: #333;">📋 Watchlist</h2>
+                <p style="color: #555; font-size: 1.1rem;">No stocks in watchlist yet</p>
+                <p style="color: #777;">Add one below to start tracking! 👇</p>
+            </div>"""
 
         # Build table
-        display = "# 📋 Watchlist\n\n"
-        display += f"**Tracking {len(stocks)} stock(s)**\n\n"
-        display += "| Ticker | Company | Last Check | Sentiment | Stories | Alerts |\n"
-        display += "|--------|---------|------------|-----------|---------|--------|\n"
+        display = """<div style="background: #ffffff; border-radius: 8px; padding: 1.5rem; border: 1px solid #e0e0e0;">
+            <h2 style="color: #333; margin-top: 0;">📋 Watchlist</h2>
+            <p style="color: #555; font-weight: 600; margin-bottom: 1rem;">Tracking """ + str(len(stocks)) + """ stock(s)</p>
+        """
+
+        display += """
+            <table style="width: 100%; border-collapse: collapse; margin-top: 1rem;">
+                <thead>
+                    <tr style="background: #f5f5f5;">
+                        <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd; color: #333; font-weight: 600;">Ticker</th>
+                        <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd; color: #333; font-weight: 600;">Company</th>
+                        <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd; color: #333; font-weight: 600;">Last Check</th>
+                        <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd; color: #333; font-weight: 600;">Sentiment</th>
+                        <th style="padding: 12px; text-align: center; border-bottom: 2px solid #ddd; color: #333; font-weight: 600;">Stories</th>
+                        <th style="padding: 12px; text-align: center; border-bottom: 2px solid #ddd; color: #333; font-weight: 600;">Alerts</th>
+                    </tr>
+                </thead>
+                <tbody>
+        """
 
         for stock in stocks:
             ticker = stock.get("ticker", "N/A")
@@ -407,26 +427,49 @@ No stocks in watchlist yet. Add one below to start tracking!"""
             if sentiment:
                 sentiment_upper = sentiment.upper()
                 if "NEGATIVE" in sentiment_upper or "BEARISH" in sentiment_upper:
-                    sentiment_display = f"🔴 {sentiment}"
+                    sentiment_display = f'<span style="color: #c0392b; font-weight: 600;">🔴 {sentiment}</span>'
                 elif "POSITIVE" in sentiment_upper or "BULLISH" in sentiment_upper:
-                    sentiment_display = f"🟢 {sentiment}"
+                    sentiment_display = f'<span style="color: #27ae60; font-weight: 600;">🟢 {sentiment}</span>'
                 else:
-                    sentiment_display = f"⚪ {sentiment}"
+                    sentiment_display = f'<span style="color: #666;">⚪ {sentiment}</span>'
             else:
-                sentiment_display = "N/A"
+                sentiment_display = '<span style="color: #999;">N/A</span>'
 
             # Alert indicator
-            alert_display = f"⚠️ {negative_count}" if negative_count > 0 else "-"
+            if negative_count > 0:
+                alert_display = f'<span style="color: #c0392b; font-weight: 600;">⚠️ {negative_count}</span>'
+            else:
+                alert_display = '<span style="color: #999;">-</span>'
 
-            display += f"| {ticker} | {company} | {last_check_str} | {sentiment_display} | {story_count} | {alert_display} |\n"
+            display += f"""
+                <tr style="border-bottom: 1px solid #f0f0f0;">
+                    <td style="padding: 12px; font-weight: 600; color: #ff6b35;">{ticker}</td>
+                    <td style="padding: 12px; color: #555;">{company}</td>
+                    <td style="padding: 12px; color: #777; font-size: 0.9rem;">{last_check_str}</td>
+                    <td style="padding: 12px;">{sentiment_display}</td>
+                    <td style="padding: 12px; text-align: center; color: #555;">{story_count}</td>
+                    <td style="padding: 12px; text-align: center;">{alert_display}</td>
+                </tr>
+            """
 
-        display += "\n---\n\n"
-        display += "**Note**: Watchlist is checked every 10 minutes. Alerts are sent for new confirmed negative news.\n"
+        display += """
+                </tbody>
+            </table>
+            <div style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid #e0e0e0;">
+                <p style="color: #777; font-size: 0.85rem; margin: 0;">
+                    💡 <strong>Note:</strong> Watchlist is checked every 10 minutes. Alerts are sent for new confirmed negative news.
+                </p>
+            </div>
+        </div>
+        """
 
         return display
 
     except Exception as e:
-        return f"# ⚠️ Error\n\nFailed to fetch watchlist: {str(e)}"
+        return f"""<div style="text-align: center; padding: 2rem; background: #f8d7da; border-radius: 8px; border: 1px solid #f5c6cb;">
+            <h2 style="color: #721c24;">⚠️ Error</h2>
+            <p style="color: #555;">Failed to fetch watchlist: {str(e)}</p>
+        </div>"""
 
 
 def add_to_watchlist_action(ticker: str, company_name: str) -> tuple:
@@ -513,30 +556,243 @@ def create_interface():
 
     with gr.Blocks(
         title="FinSight AI",
-        theme=gr.themes.Soft(),
+        theme=gr.themes.Soft(
+            primary_hue="orange",
+            secondary_hue="pink",
+        ),
         css="""
-        .gradio-container {max-width: 1200px !important}
+        /* Clean, minimalist background */
+        .gradio-container {
+            max-width: 1400px !important;
+            background: #f8f9fa !important;
+            padding: 2rem !important;
+            min-height: 100vh;
+        }
+
+        /* Simple card styling */
+        .block {
+            background: #ffffff !important;
+            border-radius: 12px !important;
+            border: 1px solid #e0e0e0 !important;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
+        }
+
+        /* Primary buttons - solid orange */
+        .primary button, button.primary {
+            background: #ff6b35 !important;
+            border: none !important;
+            border-radius: 8px !important;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1) !important;
+            color: white !important;
+            font-weight: 600 !important;
+            padding: 12px 24px !important;
+            transition: all 0.2s ease !important;
+        }
+
+        .primary button:hover, button.primary:hover {
+            background: #e55a24 !important;
+            box-shadow: 0 4px 12px rgba(255, 107, 53, 0.3) !important;
+        }
+
+        /* Small buttons - solid green */
+        button[class*="sm"] {
+            background: #2ecc71 !important;
+            border: none !important;
+            border-radius: 8px !important;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1) !important;
+            color: #ffffff !important;
+            font-weight: 500 !important;
+            transition: all 0.2s ease !important;
+        }
+
+        button[class*="sm"]:hover {
+            background: #27ae60 !important;
+            box-shadow: 0 4px 12px rgba(46, 204, 113, 0.3) !important;
+        }
+
+        /* Stop/Remove buttons - solid red */
+        .stop button, button.stop {
+            background: #e74c3c !important;
+            border: none !important;
+            border-radius: 8px !important;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1) !important;
+            color: white !important;
+            font-weight: 500 !important;
+            transition: all 0.2s ease !important;
+        }
+
+        .stop button:hover, button.stop:hover {
+            background: #c0392b !important;
+            box-shadow: 0 4px 12px rgba(231, 76, 60, 0.3) !important;
+        }
+
+        /* Input fields - clean */
+        input, textarea, .input-field {
+            background: #ffffff !important;
+            border: 1px solid #d0d0d0 !important;
+            border-radius: 8px !important;
+            color: #333 !important;
+            transition: all 0.2s ease !important;
+        }
+
+        input:focus, textarea:focus {
+            border-color: #ff6b35 !important;
+            box-shadow: 0 0 0 3px rgba(255, 107, 53, 0.1) !important;
+            background: #ffffff !important;
+        }
+
+        /* Tab styling - clean */
+        .tab-nav button {
+            background: #f5f5f5 !important;
+            border: 1px solid #e0e0e0 !important;
+            border-radius: 8px 8px 0 0 !important;
+            color: #666 !important;
+            margin-right: 4px !important;
+            transition: all 0.2s ease !important;
+            font-weight: 500 !important;
+        }
+
+        .tab-nav button.selected {
+            background: #ffffff !important;
+            border: 1px solid #ff6b35 !important;
+            border-bottom: 3px solid #ff6b35 !important;
+            color: #ff6b35 !important;
+            font-weight: 600 !important;
+        }
+
+        .tab-nav button:hover:not(.selected) {
+            background: #ffffff !important;
+            color: #333 !important;
+        }
+
+        /* Card/Column styling */
+        .gr-column {
+            background: #ffffff !important;
+            border-radius: 12px !important;
+            border: 1px solid #e0e0e0 !important;
+            padding: 1.5rem !important;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05) !important;
+        }
+
+        /* Headers - simple dark text */
+        h1, h2, h3 {
+            color: #1a1a1a !important;
+            font-weight: 700 !important;
+        }
+
+        h1 {
+            color: #ff6b35 !important;
+        }
+
+        /* Markdown containers */
+        .markdown-content {
+            background: #fafafa !important;
+            border-radius: 8px !important;
+            padding: 1rem !important;
+            border: 1px solid #e0e0e0 !important;
+        }
+
+        /* Status indicators */
+        .status-success {
+            color: #27ae60 !important;
+        }
+
+        .status-error {
+            color: #c0392b !important;
+        }
+
+        .status-warning {
+            color: #f39c12 !important;
+        }
+
+        /* Scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #f0f0f0;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #ccc;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #999;
+        }
+
+        /* Animation for loading states */
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
+        .loading {
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        /* Table styling */
+        table {
+            background: #ffffff !important;
+            border-radius: 8px !important;
+            overflow: hidden !important;
+            border: 1px solid #e0e0e0 !important;
+        }
+
+        th {
+            background: #f5f5f5 !important;
+            color: #333 !important;
+            font-weight: 600 !important;
+            border-bottom: 2px solid #e0e0e0 !important;
+        }
+
+        td {
+            color: #333 !important;
+            border-bottom: 1px solid #f0f0f0 !important;
+        }
+
+        tr:hover {
+            background: #fafafa !important;
+        }
         """
     ) as demo:
 
         gr.Markdown("""
-        # 📊 FinSight AI
-
-        **Multi-agent equity research platform for Indian stocks**
-
-        Powered by six specialist AI agents analyzing filings, financials, news, technicals, and risk.
+        <div style="text-align: center; padding: 2rem 0;">
+            <h1 style="font-size: 3.5rem; margin-bottom: 0.5rem; color: #ff6b35;">
+                📊 FinSight AI
+            </h1>
+            <p style="font-size: 1.3rem; color: #555; font-weight: 500;">
+                Multi-agent equity research platform for Indian stocks
+            </p>
+            <p style="font-size: 1rem; color: #888; margin-top: 0.5rem;">
+                🤖 Powered by six specialist AI agents analyzing filings, financials, news, technicals, and risk
+            </p>
+        </div>
         """)
 
         # Check backend status on load
         with gr.Row():
             backend_status = gr.Markdown(
-                "🔄 Checking backend status..." if check_backend_health()
-                else "⚠️ **Backend not running**. Please start: `uvicorn main:app --port 8000 --reload`"
+                """<div style="text-align: center; padding: 1rem; background: #d4edda; border-radius: 8px; border: 1px solid #c3e6cb;">
+                    <span style="font-size: 1.1rem; color: #155724; font-weight: 600;">✅ Backend is running</span>
+                </div>""" if check_backend_health()
+                else """<div style="text-align: center; padding: 1rem; background: #f8d7da; border-radius: 8px; border: 1px solid #f5c6cb;">
+                    <span style="font-size: 1.1rem; color: #721c24; font-weight: 600;">⚠️ Backend not running</span><br>
+                    <span style="font-size: 0.9rem; color: #555;">Please start: <code style="background: #fff; padding: 2px 8px; border-radius: 4px; color: #333;">uvicorn main:app --port 8000 --reload</code></span>
+                </div>"""
             )
 
         with gr.Row():
             with gr.Column(scale=1):
-                gr.Markdown("### Input")
+                gr.Markdown("""
+                <div style="text-align: center; padding: 0.8rem; background: #f0f0f0; border-radius: 8px; margin-bottom: 1rem; border: 1px solid #e0e0e0;">
+                    <h3 style="margin: 0; color: #333;">📝 Input</h3>
+                </div>
+                """)
 
                 ticker_input = gr.Textbox(
                     label="Ticker Symbol",
@@ -559,9 +815,13 @@ def create_interface():
                     lines=1
                 )
 
-                analyze_btn = gr.Button("🔍 Analyze", variant="primary", size="lg")
+                analyze_btn = gr.Button("🔍 Analyze Stock", variant="primary", size="lg")
 
-                gr.Markdown("### Quick Examples")
+                gr.Markdown("""
+                <div style="text-align: center; padding: 0.8rem; background: #f0f0f0; border-radius: 8px; margin-top: 1.5rem; margin-bottom: 1rem; border: 1px solid #e0e0e0;">
+                    <h3 style="margin: 0; color: #333;">⚡ Quick Examples</h3>
+                </div>
+                """)
 
                 with gr.Row():
                     reliance_btn = gr.Button("RELIANCE", size="sm")
@@ -575,21 +835,31 @@ def create_interface():
                     wipro_btn = gr.Button("WIPRO", size="sm")
 
                 gr.Markdown("""
-                ### About
-
-                FinSight AI orchestrates six specialist agents:
-                1. **Filing Analyst** - Analyzes company filings
-                2. **Ratio Cruncher** - Calculates financial ratios
-                3. **News Sentinel** - Sentiment analysis
-                4. **Technical Analyst** - Technical indicators
-                5. **Risk Assessor** - Risk metrics
-                6. **Report Writer** - Synthesizes final report
-
-                Analysis takes 2-5 minutes depending on data availability.
+                <div style="background: #ffffff; border-radius: 8px; padding: 1rem; margin-top: 1.5rem; border: 1px solid #e0e0e0;">
+                    <h3 style="color: #333; margin-top: 0;">ℹ️ About</h3>
+                    <p style="color: #555; font-size: 0.95rem; line-height: 1.6;">
+                        FinSight AI orchestrates six specialist agents:
+                    </p>
+                    <ul style="color: #555; font-size: 0.9rem; line-height: 1.8;">
+                        <li><strong>Filing Analyst</strong> - Analyzes company filings</li>
+                        <li><strong>Ratio Cruncher</strong> - Calculates financial ratios</li>
+                        <li><strong>News Sentinel</strong> - Sentiment analysis</li>
+                        <li><strong>Technical Analyst</strong> - Technical indicators</li>
+                        <li><strong>Risk Assessor</strong> - Risk metrics</li>
+                        <li><strong>Report Writer</strong> - Synthesizes final report</li>
+                    </ul>
+                    <p style="color: #777; font-size: 0.85rem; margin-bottom: 0;">
+                        ⏱️ Analysis takes 2-5 minutes depending on data availability
+                    </p>
+                </div>
                 """)
 
             with gr.Column(scale=2):
-                gr.Markdown("### Results")
+                gr.Markdown("""
+                <div style="text-align: center; padding: 0.8rem; background: #f0f0f0; border-radius: 8px; margin-bottom: 1rem; border: 1px solid #e0e0e0;">
+                    <h3 style="margin: 0; color: #333;">📊 Results</h3>
+                </div>
+                """)
 
                 with gr.Tabs() as tabs:
                     with gr.Tab("📄 Investment Report"):
@@ -636,27 +906,33 @@ def create_interface():
 
                     with gr.Tab("📊 Tracking"):
                         gr.Markdown("""
-                        ### Stock Watchlist
-
-                        Add stocks to track and receive email alerts when confirmed negative news is detected.
-
-                        **Alert Criteria:**
-                        - ✅ Confirmed (≥2 trusted sources)
-                        - ✅ Negative sentiment
-                        - ✅ New story (not previously seen)
-
-                        Watchlist is checked every 10 minutes automatically.
+                        <div style="background: #ffffff; border-radius: 8px; padding: 1.5rem; margin-bottom: 1rem; border: 1px solid #e0e0e0;">
+                            <h3 style="color: #333; margin-top: 0;">📋 Stock Watchlist</h3>
+                            <p style="color: #555; font-size: 0.95rem; line-height: 1.6;">
+                                Add stocks to track and receive email alerts when confirmed negative news is detected.
+                            </p>
+                            <div style="background: #f5f5f5; border-radius: 6px; padding: 1rem; margin-top: 1rem; border: 1px solid #e0e0e0;">
+                                <p style="color: #333; font-weight: 600; margin-bottom: 0.5rem;">Alert Criteria:</p>
+                                <ul style="color: #555; font-size: 0.9rem; line-height: 1.6; margin: 0;">
+                                    <li>✅ Confirmed (≥2 trusted sources)</li>
+                                    <li>✅ Negative sentiment</li>
+                                    <li>✅ New story (not previously seen)</li>
+                                </ul>
+                            </div>
+                            <p style="color: #777; font-size: 0.85rem; margin-top: 1rem; margin-bottom: 0;">
+                                🔄 Watchlist is checked every 10 minutes automatically
+                            </p>
+                        </div>
                         """)
 
-                        watchlist_display = gr.Markdown(
-                            get_watchlist_display(),
-                            line_breaks=True
+                        watchlist_display = gr.HTML(
+                            get_watchlist_display()
                         )
 
                         with gr.Row():
                             refresh_btn = gr.Button("🔄 Refresh", size="sm")
 
-                        gr.Markdown("### Add Stock to Watchlist")
+                        gr.Markdown("### 📥 Add Stock to Watchlist")
 
                         with gr.Row():
                             add_ticker_input = gr.Textbox(
@@ -672,7 +948,7 @@ def create_interface():
 
                         add_btn = gr.Button("➕ Add to Watchlist", variant="primary")
 
-                        gr.Markdown("### Remove Stock from Watchlist")
+                        gr.Markdown("### 🗑️ Remove Stock from Watchlist")
 
                         with gr.Row():
                             remove_ticker_input = gr.Textbox(
