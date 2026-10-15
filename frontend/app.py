@@ -228,16 +228,216 @@ def format_errors_display(result: Dict[str, Any]) -> str:
     return display
 
 
+def format_verdict_display(verdict_data: Optional[Dict[str, Any]], result: Dict[str, Any]) -> str:
+    """
+    Format investment verdict for visual display.
+
+    Args:
+        verdict_data: Verdict computation result
+        result: Full analysis result (for price data)
+
+    Returns:
+        HTML-formatted verdict display
+    """
+    if not verdict_data or "error" in verdict_data:
+        error_msg = verdict_data.get("error", "Verdict computation failed") if verdict_data else "No verdict data"
+        return f"""<div style="text-align: center; padding: 2rem; background: #f8d7da; border-radius: 8px;">
+            <h2 style="color: #721c24;">⚠️ Verdict Unavailable</h2>
+            <p style="color: #555;">{error_msg}</p>
+        </div>"""
+
+    verdict = verdict_data.get("verdict", "UNKNOWN")
+    net_score = verdict_data.get("net_score", 0.0)
+    confidence = verdict_data.get("confidence", 0.0)
+    components = verdict_data.get("components", [])
+    top_positive = verdict_data.get("top_positive_drivers", [])
+    top_negative = verdict_data.get("top_negative_drivers", [])
+    narrative = verdict_data.get("narrative", "")
+    disclaimer = verdict_data.get("disclaimer", "")
+
+    # Verdict color mapping
+    verdict_colors = {
+        "INVEST": {"bg": "#d4edda", "border": "#c3e6cb", "text": "#155724", "icon": "✅"},
+        "HOLD": {"bg": "#fff3cd", "border": "#ffeeba", "text": "#856404", "icon": "⏸️"},
+        "WATCH": {"bg": "#fff3cd", "border": "#ffeeba", "text": "#856404", "icon": "👁️"},
+        "AVOID": {"bg": "#f8d7da", "border": "#f5c6cb", "text": "#721c24", "icon": "⛔"}
+    }
+
+    colors = verdict_colors.get(verdict, verdict_colors["HOLD"])
+
+    # Start HTML
+    html = """<div style="background: #ffffff; padding: 0; font-family: system-ui, -apple-system, sans-serif;">"""
+
+    # 1. Verdict Banner
+    html += f"""
+    <div style="background: {colors['bg']}; border: 2px solid {colors['border']}; border-radius: 12px; padding: 2rem; text-align: center; margin-bottom: 2rem;">
+        <div style="font-size: 4rem; margin-bottom: 0.5rem;">{colors['icon']}</div>
+        <h1 style="color: {colors['text']}; font-size: 2.5rem; margin: 0.5rem 0; font-weight: 700;">{verdict}</h1>
+        <div style="font-size: 1.8rem; color: {colors['text']}; font-weight: 600; margin: 1rem 0;">
+            Net Score: {net_score:+.2f} / 10
+        </div>
+        <div style="font-size: 1.2rem; color: {colors['text']}; opacity: 0.8;">
+            Confidence: {confidence:.1f}%
+        </div>
+    </div>
+    """
+
+    # 2. Narrative Explanation
+    if narrative:
+        html += f"""
+        <div style="background: #f8f9fa; border-radius: 8px; padding: 1.5rem; margin-bottom: 2rem; border: 1px solid #e0e0e0;">
+            <h3 style="color: #1a1a1a; margin-top: 0; font-size: 1.3rem; font-weight: 700;">📝 Explanation</h3>
+            <div style="color: #1a1a1a; font-size: 1.05rem; line-height: 1.7; font-weight: 500;">
+                {narrative.replace(chr(10), '<br>')}
+            </div>
+        </div>
+        """
+
+    # 3. Component Scores - Waterfall Chart (using text bars)
+    html += """
+    <div style="background: #ffffff; border-radius: 8px; padding: 1.5rem; margin-bottom: 2rem; border: 1px solid #e0e0e0;">
+        <h3 style="color: #1a1a1a; margin-top: 0; font-size: 1.3rem; font-weight: 700;">📊 Component Contributions</h3>
+    """
+
+    for comp in components:
+        if not comp["available"]:
+            # Grey out unavailable
+            html += f"""
+            <div style="margin-bottom: 1rem; opacity: 0.4;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.3rem;">
+                    <span style="font-weight: 600; color: #999;">{comp['name']}</span>
+                    <span style="color: #999; font-size: 0.9rem;">Unavailable</span>
+                </div>
+                <div style="background: #f0f0f0; height: 8px; border-radius: 4px;"></div>
+            </div>
+            """
+        else:
+            score = comp["score"]
+            label = comp["label"]
+
+            # Determine bar color and width
+            if score > 0:
+                bar_color = "#27ae60"
+                bar_width = (score / 3.0) * 100  # Max score is 3
+            elif score < 0:
+                bar_color = "#e74c3c"
+                bar_width = (abs(score) / 3.0) * 100
+            else:
+                bar_color = "#95a5a6"
+                bar_width = 5
+
+            html += f"""
+            <div style="margin-bottom: 1rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.3rem;">
+                    <span style="font-weight: 700; color: #1a1a1a; font-size: 1rem;">{comp['name']}</span>
+                    <span style="color: {bar_color}; font-weight: 700; font-size: 1.2rem;">{score:+.2f}</span>
+                </div>
+                <div style="background: #f0f0f0; height: 28px; border-radius: 4px; position: relative; overflow: hidden;">
+                    <div style="background: {bar_color}; width: {bar_width:.1f}%; height: 100%; display: flex; align-items: center; padding-left: 10px; min-width: 70px;">
+                        <span style="color: white; font-size: 0.9rem; font-weight: 700;">{label}</span>
+                    </div>
+                </div>
+            </div>
+            """
+
+    html += "</div>"
+
+    # 4. Why Invest / Why Not columns
+    if top_positive or top_negative:
+        html += """
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 2rem;">
+        """
+
+        # Why Invest column
+        html += """
+        <div style="background: #d4edda; border-radius: 8px; padding: 1.5rem; border: 1px solid #c3e6cb;">
+            <h3 style="color: #0d4016; margin-top: 0; font-size: 1.2rem; font-weight: 700;">✅ Why Invest</h3>
+        """
+
+        if top_positive:
+            html += "<ul style='color: #0d4016; line-height: 1.8; padding-left: 1.5rem; margin: 0; font-size: 0.95rem; font-weight: 500;'>"
+            for driver in top_positive[:5]:
+                html += f"<li>{driver}</li>"
+            html += "</ul>"
+        else:
+            html += "<p style='color: #0d4016; font-weight: 500;'>No strong positive signals</p>"
+
+        html += "</div>"
+
+        # Why Not column
+        html += """
+        <div style="background: #f8d7da; border-radius: 8px; padding: 1.5rem; border: 1px solid #f5c6cb;">
+            <h3 style="color: #5a0a0f; margin-top: 0; font-size: 1.2rem; font-weight: 700;">⚠️ Key Concerns</h3>
+        """
+
+        if top_negative:
+            html += "<ul style='color: #5a0a0f; line-height: 1.8; padding-left: 1.5rem; margin: 0; font-size: 0.95rem; font-weight: 500;'>"
+            for driver in top_negative[:5]:
+                html += f"<li>{driver}</li>"
+            html += "</ul>"
+        else:
+            html += "<p style='color: #5a0a0f; font-weight: 500;'>No significant concerns</p>"
+
+        html += "</div>"
+        html += "</div>"
+
+    # 5. Expandable Component Details
+    html += """
+    <div style="background: #ffffff; border-radius: 8px; padding: 1.5rem; margin-bottom: 2rem; border: 1px solid #e0e0e0;">
+        <h3 style="color: #1a1a1a; margin-top: 0; font-size: 1.3rem; font-weight: 700;">🔍 Component Details</h3>
+    """
+
+    for comp in components:
+        if comp["available"]:
+            score = comp["score"]
+            label = comp["label"]
+            drivers = comp.get("drivers", [])
+
+            html += f"""
+            <details style="margin-bottom: 1rem; border: 1px solid #e0e0e0; border-radius: 6px; padding: 0.8rem; background: #fafafa;">
+                <summary style="cursor: pointer; font-weight: 700; color: #1a1a1a; font-size: 1rem;">
+                    {comp['name']}: {score:+.2f} ({label})
+                </summary>
+                <div style="margin-top: 0.8rem; padding-left: 1rem; color: #1a1a1a;">
+                    <ul style="line-height: 1.8; margin: 0; font-weight: 500;">
+            """
+
+            for driver in drivers:
+                html += f"<li>{driver}</li>"
+
+            html += """
+                    </ul>
+                </div>
+            </details>
+            """
+
+    html += "</div>"
+
+    # 6. Disclaimer
+    if disclaimer:
+        html += f"""
+        <div style="background: #fff3cd; border: 1px solid #ffeeba; border-radius: 8px; padding: 1rem; margin-bottom: 1rem;">
+            <p style="color: #856404; font-size: 0.9rem; margin: 0; line-height: 1.6;">
+                ⚠️ <strong>Disclaimer:</strong> {disclaimer}
+            </p>
+        </div>
+        """
+
+    html += "</div>"
+
+    return html
+
+
 def analyze_stock(
     ticker: str,
     company_name: str,
     sector: str
-) -> Tuple[str, str, str, str, str, str, str]:
+) -> Tuple[str, str, str, str, str, str, str, str]:
     """
     Call FastAPI backend to analyze stock.
 
     Returns tuple of formatted outputs for each tab:
-    (report, filing, ratios, news, technical, risk, errors)
+    (verdict, report, filing, ratios, news, technical, risk, errors)
     """
     # Check if backend is running
     if not check_backend_health():
@@ -253,12 +453,12 @@ uvicorn main:app --port 8000 --reload
 
 Then refresh this page and try again.""".format(API_BASE_URL)
 
-        return error_msg, error_msg, error_msg, error_msg, error_msg, error_msg, error_msg
+        return error_msg, error_msg, error_msg, error_msg, error_msg, error_msg, error_msg, error_msg
 
     # Validate input
     if not ticker or not ticker.strip():
         error_msg = "# ⚠️ Invalid Input\n\nPlease enter a ticker symbol."
-        return error_msg, error_msg, error_msg, error_msg, error_msg, error_msg, error_msg
+        return error_msg, error_msg, error_msg, error_msg, error_msg, error_msg, error_msg, error_msg
 
     # Prepare request
     payload = {
@@ -282,18 +482,22 @@ Then refresh this page and try again.""".format(API_BASE_URL)
 
 Please check your input and try again."""
 
-            return error_msg, error_msg, error_msg, error_msg, error_msg, error_msg, error_msg
+            return error_msg, error_msg, error_msg, error_msg, error_msg, error_msg, error_msg, error_msg
 
         # Parse successful response
         result = response.json()
 
         # Extract outputs
+        investment_verdict = result.get("investment_verdict")
         final_report = result.get("final_report", {})
         filing_output = result.get("filing_output")
         ratio_output = result.get("ratio_output")
         news_output = result.get("news_output")
         technical_output = result.get("technical_output")
         risk_output = result.get("risk_output")
+
+        # Format verdict display
+        verdict_display = format_verdict_display(investment_verdict, result)
 
         # Format each tab
         report_display = final_report.get("report_markdown", "# No report generated")
@@ -317,6 +521,7 @@ Please check your input and try again."""
         errors_display = format_errors_display(result)
 
         return (
+            verdict_display,
             report_display,
             filing_display,
             ratios_display,
@@ -354,7 +559,7 @@ Please check:
 2. Network connectivity
 3. Backend logs for details"""
 
-        return error_msg, error_msg, error_msg, error_msg, error_msg, error_msg, error_msg
+        return error_msg, error_msg, error_msg, error_msg, error_msg, error_msg, error_msg, error_msg
 
 
 def get_watchlist_display() -> str:
@@ -569,6 +774,47 @@ def create_interface():
             min-height: 100vh;
         }
 
+        /* FORCE ALL TEXT TO BE DARK - HIGHEST PRIORITY */
+        * {
+            color: #1a1a1a !important;
+        }
+
+        /* Override any light text */
+        p, span, div, li, td, th, label, a, h1, h2, h3, h4, h5, h6 {
+            color: #1a1a1a !important;
+            font-weight: 500 !important;
+        }
+
+        /* Headers should be even darker */
+        h1, h2, h3, h4, h5, h6, strong, b {
+            color: #000000 !important;
+            font-weight: 700 !important;
+        }
+
+        /* Markdown content - force dark text */
+        .markdown-body, .markdown-content, .markdown, .prose,
+        .markdown-body *, .markdown-content *, .markdown *, .prose * {
+            color: #1a1a1a !important;
+            font-weight: 500 !important;
+        }
+
+        /* Code blocks - dark text on light background */
+        code, pre, code *, pre * {
+            background: #f5f5f5 !important;
+            color: #000000 !important;
+            font-weight: 600 !important;
+            padding: 3px 8px !important;
+            border-radius: 4px !important;
+            border: 1px solid #d0d0d0 !important;
+        }
+
+        /* JSON/Text output areas */
+        .json-output, .text-output, textarea {
+            color: #000000 !important;
+            background: #ffffff !important;
+            font-weight: 500 !important;
+        }
+
         /* Simple card styling */
         .block {
             background: #ffffff !important;
@@ -631,7 +877,8 @@ def create_interface():
             background: #ffffff !important;
             border: 1px solid #d0d0d0 !important;
             border-radius: 8px !important;
-            color: #333 !important;
+            color: #000000 !important;
+            font-weight: 500 !important;
             transition: all 0.2s ease !important;
         }
 
@@ -646,10 +893,10 @@ def create_interface():
             background: #f5f5f5 !important;
             border: 1px solid #e0e0e0 !important;
             border-radius: 8px 8px 0 0 !important;
-            color: #666 !important;
+            color: #000000 !important;
             margin-right: 4px !important;
             transition: all 0.2s ease !important;
-            font-weight: 500 !important;
+            font-weight: 600 !important;
         }
 
         .tab-nav button.selected {
@@ -657,12 +904,12 @@ def create_interface():
             border: 1px solid #ff6b35 !important;
             border-bottom: 3px solid #ff6b35 !important;
             color: #ff6b35 !important;
-            font-weight: 600 !important;
+            font-weight: 700 !important;
         }
 
         .tab-nav button:hover:not(.selected) {
             background: #ffffff !important;
-            color: #333 !important;
+            color: #000000 !important;
         }
 
         /* Card/Column styling */
@@ -674,35 +921,20 @@ def create_interface():
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05) !important;
         }
 
-        /* Headers - simple dark text */
-        h1, h2, h3 {
-            color: #1a1a1a !important;
-            font-weight: 700 !important;
-        }
-
-        h1 {
-            color: #ff6b35 !important;
-        }
-
-        /* Markdown containers */
-        .markdown-content {
-            background: #fafafa !important;
-            border-radius: 8px !important;
-            padding: 1rem !important;
-            border: 1px solid #e0e0e0 !important;
-        }
-
         /* Status indicators */
         .status-success {
             color: #27ae60 !important;
+            font-weight: 700 !important;
         }
 
         .status-error {
             color: #c0392b !important;
+            font-weight: 700 !important;
         }
 
         .status-warning {
             color: #f39c12 !important;
+            font-weight: 700 !important;
         }
 
         /* Scrollbar styling */
@@ -744,18 +976,29 @@ def create_interface():
 
         th {
             background: #f5f5f5 !important;
-            color: #333 !important;
-            font-weight: 600 !important;
+            color: #000000 !important;
+            font-weight: 700 !important;
             border-bottom: 2px solid #e0e0e0 !important;
         }
 
         td {
-            color: #333 !important;
+            color: #1a1a1a !important;
+            font-weight: 500 !important;
             border-bottom: 1px solid #f0f0f0 !important;
         }
 
         tr:hover {
             background: #fafafa !important;
+        }
+
+        /* HTML output areas - force dark text */
+        .html-output, .html-output * {
+            color: inherit !important;
+        }
+
+        /* Exception for white text in colored backgrounds (buttons, badges) */
+        button *, .badge *, .tag * {
+            color: inherit !important;
         }
         """
     ) as demo:
@@ -840,13 +1083,13 @@ def create_interface():
                     <p style="color: #555; font-size: 0.95rem; line-height: 1.6;">
                         FinSight AI orchestrates six specialist agents:
                     </p>
-                    <ul style="color: #555; font-size: 0.9rem; line-height: 1.8;">
-                        <li><strong>Filing Analyst</strong> - Analyzes company filings</li>
-                        <li><strong>Ratio Cruncher</strong> - Calculates financial ratios</li>
-                        <li><strong>News Sentinel</strong> - Sentiment analysis</li>
-                        <li><strong>Technical Analyst</strong> - Technical indicators</li>
-                        <li><strong>Risk Assessor</strong> - Risk metrics</li>
-                        <li><strong>Report Writer</strong> - Synthesizes final report</li>
+                    <ul style="color: #333; font-size: 0.95rem; line-height: 1.8; font-weight: 500;">
+                        <li><strong style="color: #1a1a1a;">Filing Analyst</strong> - Analyzes company filings</li>
+                        <li><strong style="color: #1a1a1a;">Ratio Cruncher</strong> - Calculates financial ratios</li>
+                        <li><strong style="color: #1a1a1a;">News Sentinel</strong> - Sentiment analysis</li>
+                        <li><strong style="color: #1a1a1a;">Technical Analyst</strong> - Technical indicators</li>
+                        <li><strong style="color: #1a1a1a;">Risk Assessor</strong> - Risk metrics</li>
+                        <li><strong style="color: #1a1a1a;">Report Writer</strong> - Synthesizes final report</li>
                     </ul>
                     <p style="color: #777; font-size: 0.85rem; margin-bottom: 0;">
                         ⏱️ Analysis takes 2-5 minutes depending on data availability
@@ -862,6 +1105,13 @@ def create_interface():
                 """)
 
                 with gr.Tabs() as tabs:
+                    with gr.Tab("🎯 Investment Verdict"):
+                        verdict_output = gr.HTML(
+                            """<div style="text-align: center; padding: 3rem; color: #999;">
+                                Run an analysis to see the investment verdict.
+                            </div>"""
+                        )
+
                     with gr.Tab("📄 Investment Report"):
                         report_output = gr.Markdown(
                             "Run an analysis to see the comprehensive investment report.",
@@ -964,6 +1214,7 @@ def create_interface():
             fn=analyze_stock,
             inputs=[ticker_input, company_name_input, sector_input],
             outputs=[
+                verdict_output,
                 report_output,
                 filing_output,
                 ratios_output,

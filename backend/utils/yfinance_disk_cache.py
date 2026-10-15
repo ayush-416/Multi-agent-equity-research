@@ -15,8 +15,14 @@ logger = logging.getLogger(__name__)
 
 # Separate cache directory for yfinance data
 YFINANCE_CACHE_DIR = Path("data/yfinance_cache")
-# Short TTL for market data (20 minutes default)
-YFINANCE_CACHE_TTL_MINUTES = int(os.getenv("YFINANCE_CACHE_TTL_MINUTES", "20"))
+# TTL for different data types (in minutes)
+CACHE_TTL_MINUTES = {
+    "price_history": 60,  # 1 hour for price data
+    "nifty_history": 60,  # 1 hour for market index
+    "stock_info": 1440,   # 24 hours for fundamental info
+}
+# Default TTL if type not specified
+DEFAULT_CACHE_TTL_MINUTES = 60
 
 
 def _cache_path(cache_type: str, ticker: str, period: str = None) -> Path:
@@ -61,10 +67,11 @@ def get_cached_data(cache_type: str, ticker: str, period: str = None) -> Optiona
             logger.warning(f"Corrupted yfinance cache for {cache_type}/{ticker}, ignoring")
             return None
 
-        # Check TTL
+        # Check TTL based on cache type
+        ttl_minutes = CACHE_TTL_MINUTES.get(cache_type, DEFAULT_CACHE_TTL_MINUTES)
         age_minutes = (time.time() - data["_cached_at"]) / 60
-        if age_minutes > YFINANCE_CACHE_TTL_MINUTES:
-            logger.debug(f"Yfinance cache expired for {cache_type}/{ticker} (age: {age_minutes:.1f}min)")
+        if age_minutes > ttl_minutes:
+            logger.debug(f"Yfinance cache expired for {cache_type}/{ticker} (age: {age_minutes:.1f}min, TTL: {ttl_minutes}min)")
             return None
 
         logger.info(f"Yfinance disk cache HIT for {cache_type}/{ticker} (age: {age_minutes:.1f}min)")

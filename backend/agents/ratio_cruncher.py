@@ -60,9 +60,14 @@ def run_ratio_cruncher(
         logger.info(f"Starting ratio analysis for {ticker} ({company_name})")
 
         # Use cached stock info if provided, otherwise fetch
-        if cached_stock_info is not None and "error" not in cached_stock_info:
-            logger.info("Using cached stock info from workflow state")
-            stock_info = cached_stock_info
+        if cached_stock_info is not None:
+            if "error" not in cached_stock_info:
+                logger.info("Using cached stock info from workflow state")
+                stock_info = cached_stock_info
+            else:
+                logger.error(f"Cached stock info has error: {cached_stock_info['error']}")
+                result["error"] = f"Stock data unavailable: {cached_stock_info['error']}"
+                return result
         else:
             logger.info("Fetching stock info (cache not available)")
             stock_info = get_stock_info.func(ticker)

@@ -87,13 +87,17 @@ def run_risk_assessor(
         metrics = {}
         unavailable = []
 
-        # === 1. Fetch price history ===
-        if cached_price_history is not None and "error" not in cached_price_history:
-            logger.info("Using cached price history from workflow state")
-            price_data = cached_price_history
-            has_price_data = True
+        # === 1. Use cached price history (don't refetch on cache failure) ===
+        if cached_price_history is not None:
+            if "error" not in cached_price_history:
+                logger.info("Using cached price history from workflow state")
+                price_data = cached_price_history
+                has_price_data = True
+            else:
+                logger.warning(f"Cached price history has error: {cached_price_history['error']}")
+                price_data = cached_price_history
         else:
-            logger.info("Fetching price history (cache not available)")
+            logger.info("Fetching price history (cache not provided)")
             try:
                 price_data = get_price_history.func(ticker, period="1y")
                 if "error" not in price_data:
@@ -105,13 +109,17 @@ def run_risk_assessor(
                 logger.warning(f"Failed to fetch price data: {e}")
                 price_data = {"error": str(e)}
 
-        # === 2. Fetch stock info ===
-        if cached_stock_info is not None and "error" not in cached_stock_info:
-            logger.info("Using cached stock info from workflow state")
-            stock_info = cached_stock_info
-            has_stock_info = True
+        # === 2. Use cached stock info (don't refetch on cache failure) ===
+        if cached_stock_info is not None:
+            if "error" not in cached_stock_info:
+                logger.info("Using cached stock info from workflow state")
+                stock_info = cached_stock_info
+                has_stock_info = True
+            else:
+                logger.warning(f"Cached stock info has error: {cached_stock_info['error']}")
+                stock_info = cached_stock_info
         else:
-            logger.info("Fetching stock info (cache not available)")
+            logger.info("Fetching stock info (cache not provided)")
             try:
                 stock_info = get_stock_info.func(ticker)
                 if "error" not in stock_info:
@@ -123,13 +131,17 @@ def run_risk_assessor(
                 logger.warning(f"Failed to fetch stock info: {e}")
                 stock_info = {"error": str(e)}
 
-        # === 3. Fetch Nifty history for beta ===
-        if cached_nifty_history is not None and "error" not in cached_nifty_history:
-            logger.info("Using cached Nifty history from workflow state")
-            nifty_data = cached_nifty_history
-            has_nifty_data = True
+        # === 3. Use cached Nifty history (don't refetch on cache failure) ===
+        if cached_nifty_history is not None:
+            if "error" not in cached_nifty_history:
+                logger.info("Using cached Nifty history from workflow state")
+                nifty_data = cached_nifty_history
+                has_nifty_data = True
+            else:
+                logger.warning(f"Cached Nifty history has error: {cached_nifty_history['error']}")
+                nifty_data = cached_nifty_history
         else:
-            logger.info("Fetching Nifty history (cache not available)")
+            logger.info("Fetching Nifty history (cache not provided)")
             try:
                 nifty_data = get_nifty_history.func(period="1y")
                 if "error" not in nifty_data:

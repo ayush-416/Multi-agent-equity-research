@@ -28,6 +28,8 @@ from backend.utils.watchlist import (
 )
 from backend.agents.news_sentinel import run_news_sentinel
 from backend.utils.alerting import should_send_alert, send_alert_email
+from backend.scoring.verdict import compute_investment_verdict
+from backend.scoring.narrative import generate_narrative_explanation
 
 # Load environment variables from .env file
 load_dotenv()
@@ -218,6 +220,40 @@ async def analyze(request: AnalysisRequest):
         logger.info(f"Analysis completed for {ticker}")
         logger.info(f"Errors: {len(result.get('errors', []))}")
         logger.info(f"Report generated: {result.get('final_report') is not None}")
+
+        # Compute investment verdict
+        try:
+            logger.info(f"Computing investment verdict for {ticker}")
+            verdict_result = compute_investment_verdict(
+                news_output=result.get("news_output"),
+                ratio_output=result.get("ratio_output"),
+                technical_output=result.get("technical_output"),
+                risk_output=result.get("risk_output"),
+                filing_output=result.get("filing_output")
+            )
+
+            # Generate narrative explanation
+            narrative = generate_narrative_explanation(
+                ticker=result.get("ticker", ticker),
+                company_name=result.get("company_name", company_name),
+                verdict_result=verdict_result
+            )
+            verdict_result["narrative"] = narrative
+
+            # Add disclaimer
+            verdict_result["disclaimer"] = "This analysis is for informational purposes only and does not constitute financial advice. Consult a qualified financial advisor before making investment decisions."
+
+            result["investment_verdict"] = verdict_result
+            logger.info(f"Verdict computed: {verdict_result['verdict']} (score: {verdict_result['net_score']})")
+
+        except Exception as e:
+            logger.error(f"Failed to compute verdict: {e}", exc_info=True)
+            result["investment_verdict"] = {
+                "error": f"Verdict computation failed: {str(e)}",
+                "verdict": "UNKNOWN",
+                "net_score": 0.0,
+                "confidence": 0.0
+            }
 
         # Sanitize result to handle NaN/Infinity values
         sanitized_result = sanitize_for_json(result)
@@ -423,19 +459,24 @@ async def startup_event():
     logger.info("Version: 0.1.0")
     logger.info("=" * 60)
 
-    # Start background scheduler
-    try:
-        scheduler.add_job(
-            check_watchlist_stocks,
-            trigger=IntervalTrigger(minutes=10),
-            id="watchlist_checker",
-            name="Check watchlist for news updates",
-            replace_existing=True
-        )
-        scheduler.start()
-        logger.info("✓ Background scheduler started - checking watchlist every 10 minutes")
-    except Exception as e:
-        logger.error(f"Failed to start scheduler: {e}", exc_info=True)
+    # Start background scheduler only if enabled
+    enable_scheduler = os.getenv("ENABLE_WATCHLIST_SCHEDULER", "false").lower() in ["true", "1", "yes"]
+
+    if enable_scheduler:
+        try:
+            scheduler.add_job(
+                check_watchlist_stocks,
+                trigger=IntervalTrigger(minutes=10),
+                id="watchlist_checker",
+                name="Check watchlist for news updates",
+                replace_existing=True
+            )
+            scheduler.start()
+            logger.info("✓ Background scheduler started - checking watchlist every 10 minutes")
+        except Exception as e:
+            logger.error(f"Failed to start scheduler: {e}", exc_info=True)
+    else:
+        logger.info("⊘ Background scheduler disabled (set ENABLE_WATCHLIST_SCHEDULER=true to enable)")
 
 
 @app.on_event("shutdown")
@@ -443,12 +484,14 @@ async def shutdown_event():
     """Shutdown application and stop scheduler."""
     logger.info("FinSight AI - Shutting down")
 
-    # Stop scheduler
-    try:
-        scheduler.shutdown()
-        logger.info("✓ Background scheduler stopped")
-    except Exception as e:
-        logger.error(f"Error stopping scheduler: {e}")
+    # Stop scheduler if it was started
+    enable_scheduler = os.getenv("ENABLE_WATCHLIST_SCHEDULER", "false").lower() in ["true", "1", "yes"]
+    if enable_scheduler:
+        try:
+            scheduler.shutdown()
+            logger.info("✓ Background scheduler stopped")
+        except Exception as e:
+            logger.error(f"Error stopping scheduler: {e}")
 
 
 # === Run Server ===

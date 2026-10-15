@@ -7,44 +7,28 @@ All external calls use cache and handle errors gracefully.
 import logging
 import time
 from typing import Optional
+from datetime import datetime, timedelta
 import yfinance as yf
 import numpy as np
 from langchain.tools import tool
-from curl_cffi import requests as curl_requests
-
 from backend.utils.cache import cache_get, cache_set
 from backend.utils.yfinance_disk_cache import get_cached_data, set_cached_data
 from backend.utils.validators import normalize_ticker, add_ns_suffix
 
 logger = logging.getLogger(__name__)
 
-# Global curl_cffi session with Chrome impersonation to bypass Yahoo Finance TLS fingerprint blocks
-# This session is shared across all yfinance calls to maintain cookie/crumb state
-_curl_session = None
+# Note: Custom curl_cffi session removed - vanilla yfinance works reliably
+# The custom session was causing "'str' object has no attribute 'name'" errors
 
 
-def _get_curl_session():
-    """
-    Get or create the shared curl_cffi session with Chrome impersonation.
-
-    This bypasses Yahoo Finance's TLS fingerprint-based blocking.
-    Do NOT wrap this in requests_cache or other session wrappers.
-    """
-    global _curl_session
-    if _curl_session is None:
-        logger.info("Creating curl_cffi session with Chrome impersonation")
-        _curl_session = curl_requests.Session(impersonate="chrome")
-    return _curl_session
-
-
-def _retry_with_backoff(func, max_retries=3, initial_delay=1.0):
+def _retry_with_backoff(func, max_retries=3, initial_delay=5.0):
     """
     Retry a function with exponential backoff for transient errors.
 
     Args:
         func: Callable to retry
         max_retries: Maximum number of retry attempts (default: 3)
-        initial_delay: Initial delay in seconds (default: 1.0)
+        initial_delay: Initial delay in seconds (default: 5.0)
 
     Returns:
         Function result if successful
@@ -53,6 +37,8 @@ def _retry_with_backoff(func, max_retries=3, initial_delay=1.0):
         Last exception if all retries fail
     """
     last_exception = None
+    # Backoff schedule: 5s, 15s, 45s
+    delays = [5.0, 15.0, 45.0]
 
     for attempt in range(max_retries):
         try:
@@ -64,7 +50,7 @@ def _retry_with_backoff(func, max_retries=3, initial_delay=1.0):
             # Check if it's a rate limit error
             if "rate limit" in error_msg or "too many requests" in error_msg or "429" in error_msg:
                 if attempt < max_retries - 1:
-                    delay = initial_delay * (2 ** attempt)
+                    delay = delays[attempt]
                     logger.warning(f"Rate limit hit, retrying in {delay}s (attempt {attempt + 1}/{max_retries})")
                     time.sleep(delay)
                     continue
@@ -119,8 +105,7 @@ def get_stock_info(ticker: str) -> dict:
         return cached
 
     def _fetch():
-        session = _get_curl_session()
-        stock = yf.Ticker(ticker, session=session)
+        stock = yf.Ticker(ticker)
         info = stock.info
 
         # Check if we got valid data
@@ -176,6 +161,76 @@ def get_stock_info(ticker: str) -> dict:
         return {"error": str(e), "ticker": ticker}
 
 
+def _fetch_from_stooq_fallback(ticker: str, period: str = "1y") -> Optional[dict]:
+    """
+    Fallback to fetch price data from Stooq via pandas-datareader.
+
+    Args:
+        ticker: NSE ticker (e.g., "RELIANCE.NS")
+        period: Time period (e.g., "1y", "6mo")
+
+    Returns:
+        Price history dict or None if failed
+    """
+    try:
+        import pandas_datareader as pdr
+
+        # Convert period to date range
+        end_date = datetime.now()
+        period_map = {
+            "1mo": 30,
+            "3mo": 90,
+            "6mo": 180,
+            "1y": 365,
+            "2y": 730,
+            "5y": 1825
+        }
+        days = period_map.get(period, 365)
+        start_date = end_date - timedelta(days=days)
+
+        # Convert ticker format for Stooq (RELIANCE.NS -> RELIANCE.NS might work, or try without .NS)
+        # Stooq uses different format - let's try the ticker as-is first
+        logger.info(f"Attempting Stooq fallback for {ticker}")
+
+        try:
+            df = pdr.get_data_stooq(ticker, start=start_date, end=end_date)
+        except Exception:
+            # Try without exchange suffix
+            ticker_base = ticker.replace(".NS", "").replace(".BO", "")
+            logger.info(f"Retrying Stooq with base ticker: {ticker_base}")
+            df = pdr.get_data_stooq(ticker_base, start=start_date, end=end_date)
+
+        if df.empty:
+            logger.warning(f"Stooq returned no data for {ticker}")
+            return None
+
+        # Stooq returns columns: Open, High, Low, Close, Volume
+        # Convert to our format
+        result = {
+            "ticker": ticker,
+            "period": period,
+            "dates": [str(d.date()) for d in df.index],
+            "open": [round(float(v), 2) for v in df["Open"].tolist()],
+            "high": [round(float(v), 2) for v in df["High"].tolist()],
+            "low": [round(float(v), 2) for v in df["Low"].tolist()],
+            "close": [round(float(v), 2) for v in df["Close"].tolist()],
+            "volume": [int(v) for v in df["Volume"].tolist()],
+            "latest_price": round(float(df["Close"].iloc[-1]), 2),
+            "oldest_price": round(float(df["Close"].iloc[0]), 2),
+            "price_return_pct": round(
+                (float(df["Close"].iloc[-1]) / float(df["Close"].iloc[0]) - 1) * 100, 2
+            ),
+            "source": "stooq"  # Mark the source
+        }
+
+        logger.info(f"Stooq fallback successful for {ticker}: {len(df)} data points")
+        return result
+
+    except Exception as e:
+        logger.warning(f"Stooq fallback failed for {ticker}: {e}")
+        return None
+
+
 @tool
 def get_price_history(ticker: str, period: str = "1y") -> dict:
     """
@@ -203,8 +258,7 @@ def get_price_history(ticker: str, period: str = "1y") -> dict:
         return cached
 
     def _fetch():
-        session = _get_curl_session()
-        stock = yf.Ticker(ticker, session=session)
+        stock = yf.Ticker(ticker)
         hist = stock.history(period=period)
 
         if hist.empty:
@@ -239,7 +293,19 @@ def get_price_history(ticker: str, period: str = "1y") -> dict:
 
     except Exception as e:
         logger.error(f"yfinance get_price_history error for {ticker}: {e}")
-        return {"error": str(e), "ticker": ticker}
+
+        # Try fallback to Stooq
+        logger.info(f"Attempting fallback price source for {ticker}")
+        fallback_result = _fetch_from_stooq_fallback(ticker, period)
+
+        if fallback_result:
+            # Cache the fallback result
+            cache_set(cache_key, fallback_result)
+            set_cached_data("price_history", ticker, fallback_result, period)
+            return fallback_result
+
+        # Both sources failed
+        return {"error": f"All price sources failed: {str(e)}", "ticker": ticker}
 
 
 @tool
@@ -265,8 +331,7 @@ def get_nifty_history(period: str = "1y") -> dict:
         return cached
 
     def _fetch():
-        session = _get_curl_session()
-        nifty = yf.Ticker("^NSEI", session=session)
+        nifty = yf.Ticker("^NSEI")
         hist = nifty.history(period=period)
 
         if hist.empty:

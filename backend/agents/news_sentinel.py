@@ -15,9 +15,13 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 from difflib import SequenceMatcher
 
+from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 from backend.tools.news_tools import fetch_google_news
 from backend.config.news_config import is_trusted_source, get_source_tier
+
+# Load environment variables
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -30,7 +34,8 @@ SEEN_STORIES_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 def run_news_sentinel(
     ticker: str,
     company_name: str,
-    days_back: int = 7
+    days_back: Optional[int] = None,
+    trusted_only: Optional[bool] = None
 ) -> Dict[str, Any]:
     """
     Analyze recent news sentiment and themes for a company with source verification.
@@ -38,7 +43,8 @@ def run_news_sentinel(
     Args:
         ticker: Stock ticker symbol (e.g., "RELIANCE")
         company_name: Full company name (e.g., "Reliance Industries")
-        days_back: Number of days to look back for news (default: 7)
+        days_back: Number of days to look back for news (default: from env or 7)
+        trusted_only: Only use trusted sources for scoring (default: from env or False)
 
     Returns:
         Dict with keys:
@@ -57,7 +63,20 @@ def run_news_sentinel(
         - notable_headlines: Most important headlines from confirmed stories
         - sources: All source links
         - error: Error message if applicable
+        - config: Configuration used (days_back, trusted_only)
     """
+    # Load configuration from environment if not provided
+    if days_back is None:
+        days_back = int(os.getenv("NEWS_DAYS_BACK", "7"))
+
+    if trusted_only is None:
+        trusted_only_str = os.getenv("NEWS_TRUSTED_ONLY", "false").lower()
+        trusted_only = trusted_only_str in ["true", "1", "yes"]
+
+    # Check if news dedup is disabled (for testing)
+    disable_dedup_str = os.getenv("NEWS_DISABLE_DEDUP", "false").lower()
+    disable_dedup = disable_dedup_str in ["true", "1", "yes"]
+
     result = {
         "status": "error",
         "ticker": ticker,
@@ -73,11 +92,17 @@ def run_news_sentinel(
         "negative_drivers": [],
         "notable_headlines": [],
         "sources": [],
-        "error": None
+        "error": None,
+        "config": {
+            "days_back": days_back,
+            "trusted_only": trusted_only,
+            "disable_dedup": disable_dedup
+        }
     }
 
     try:
-        logger.info(f"Starting news sentinel for {ticker} ({company_name}), {days_back} days back")
+        logger.info(f"Starting news sentinel for {ticker} ({company_name})")
+        logger.info(f"Config: days_back={days_back}, trusted_only={trusted_only}")
 
         # Fetch news articles
         articles = fetch_google_news(company_name, ticker, limit=20)
@@ -102,12 +127,32 @@ def run_news_sentinel(
             result["error"] = f"No articles within {days_back} day window"
             return result
 
-        # Load seen stories for this company
-        seen_stories = _load_seen_stories(ticker)
+        # Filter by trusted sources if enabled
+        if trusted_only:
+            articles_trusted = [
+                article for article in articles_filtered
+                if is_trusted_source(article.get("source", ""))
+            ]
+            logger.info(f"After trusted filter: {len(articles_trusted)} articles (from {len(articles_filtered)})")
 
-        # Filter out already-seen stories
-        articles_new = _filter_seen_stories(articles_filtered, seen_stories)
-        logger.info(f"After dedup with history: {len(articles_new)} new articles")
+            if not articles_trusted:
+                logger.warning("No articles from trusted sources")
+                result["status"] = "partial_success"
+                result["article_count"] = len(articles)
+                result["error"] = "No articles from trusted sources in the date window"
+                return result
+
+            articles_filtered = articles_trusted
+
+        # Load seen stories for this company (skip if dedup disabled)
+        if disable_dedup:
+            logger.info("News deduplication disabled (NEWS_DISABLE_DEDUP=true)")
+            articles_new = articles_filtered
+        else:
+            seen_stories = _load_seen_stories(ticker)
+            # Filter out already-seen stories
+            articles_new = _filter_seen_stories(articles_filtered, seen_stories)
+            logger.info(f"After dedup with history: {len(articles_new)} new articles")
 
         if not articles_new:
             logger.info(f"All articles already seen for {ticker}")
@@ -129,13 +174,20 @@ def run_news_sentinel(
         for group in story_groups:
             _tag_credibility(group)
 
-        # Analyze each story group with LLM
-        analyzed_groups = []
-        for i, group in enumerate(story_groups):
-            logger.info(f"Analyzing story group {i+1}/{len(story_groups)}: {group['representative_title'][:60]}...")
-            analysis = _analyze_story_group(group, company_name, ticker)
-            if analysis:
-                analyzed_groups.append(analysis)
+        # Limit to top 8 story groups to reduce LLM calls (free tier limit)
+        # Prioritize confirmed stories first, then by source count
+        story_groups_sorted = sorted(
+            story_groups,
+            key=lambda g: (g.get("confirmed", False), len(g["sources"])),
+            reverse=True
+        )
+        story_groups_to_analyze = story_groups_sorted[:8]
+
+        if len(story_groups) > 8:
+            logger.info(f"Limited analysis to top 8 of {len(story_groups)} story groups to reduce API calls")
+
+        # Analyze story groups in ONE batched LLM call
+        analyzed_groups = _analyze_story_groups_batch(story_groups_to_analyze, company_name, ticker)
 
         result["story_groups"] = analyzed_groups
         result["confirmed_count"] = sum(1 for g in analyzed_groups if g.get("confirmed"))
@@ -158,9 +210,10 @@ def run_news_sentinel(
             if analyzed_groups:
                 _compute_aggregates(result, analyzed_groups)
 
-        # Save story IDs as seen
-        new_seen_ids = [_story_id(article) for article in articles_new]
-        _save_seen_stories(ticker, seen_stories + new_seen_ids)
+        # Save story IDs as seen (skip if dedup disabled)
+        if not disable_dedup:
+            new_seen_ids = [_story_id(article) for article in articles_new]
+            _save_seen_stories(ticker, seen_stories + new_seen_ids)
 
     except Exception as e:
         logger.error(f"News sentinel failed for {ticker}: {e}", exc_info=True)
@@ -331,51 +384,61 @@ def _tag_credibility(story_group: Dict):
     story_group["confirmed"] = len(trusted_sources) >= 2
 
 
-def _analyze_story_group(story_group: Dict, company_name: str, ticker: str) -> Optional[Dict]:
+def _analyze_story_groups_batch(story_groups: List[Dict], company_name: str, ticker: str) -> List[Dict]:
     """
-    Use LLM to analyze a story group: summary, sentiment, confidence.
+    Use ONE batched LLM call to analyze multiple story groups at once.
+    This reduces API calls dramatically (was N calls, now 1 call).
 
-    Returns dict with:
-    - representative_title
-    - summary
-    - sentiment: POSITIVE/NEGATIVE/NEUTRAL
-    - sentiment_reasoning
-    - confidence_score: 0-100 (based on source credibility + count)
-    - sources: list of source names
-    - urls: list of URLs
-    - source_tiers: list of "trusted"/"unverified"
-    - confirmed: bool
+    Returns list of analyzed story dicts.
     """
-    articles_text = "\n\n".join([
-        f"Headline: {article.get('title', '')}\n"
-        f"Source: {article.get('source', '')}\n"
-        f"Published: {article.get('published', '')}\n"
-        f"Summary: {article.get('summary', '')}"
-        for article in story_group["articles"]
-    ])
+    if not story_groups:
+        return []
 
-    prompt = f"""You are a financial news analyst. Analyze the following news story about {company_name} ({ticker}).
+    # Build batch prompt with all stories
+    stories_text = ""
+    for idx, group in enumerate(story_groups, 1):
+        articles_text = "\n".join([
+            f"  - {article.get('title', '')} ({article.get('source', '')})"
+            for article in group["articles"][:3]  # Limit to 3 articles per group to save tokens
+        ])
 
-This story has been reported by {len(story_group['sources'])} source(s):
-{', '.join(story_group['sources'])}
-
-News Articles:
+        stories_text += f"""
+STORY {idx}:
+Representative Headline: {group['representative_title']}
+Sources ({len(group['sources'])}): {', '.join(group['sources'][:5])}
+Articles:
 {articles_text}
 
-Provide a concise analysis in JSON format with this exact structure:
+"""
 
-{{
-  "summary": "<one-line summary of the story, max 120 characters>",
-  "sentiment": "<POSITIVE|NEGATIVE|NEUTRAL>",
-  "sentiment_reasoning": "<brief explanation why this sentiment, max 200 characters>"
-}}
+    prompt = f"""You are a financial news analyst. Analyze ALL the following news stories about {company_name} ({ticker}).
+
+{stories_text}
+
+For EACH story above, provide a concise analysis. Return a JSON array with this exact structure:
+
+[
+  {{
+    "story_number": 1,
+    "summary": "<one-line summary, max 120 characters>",
+    "sentiment": "<POSITIVE|NEGATIVE|NEUTRAL>",
+    "sentiment_reasoning": "<brief explanation, max 200 characters>"
+  }},
+  {{
+    "story_number": 2,
+    "summary": "...",
+    "sentiment": "...",
+    "sentiment_reasoning": "..."
+  }}
+  // ... for all stories
+]
 
 Guidelines:
-- summary: One line only, focus on the key fact or event
+- Analyze ALL {len(story_groups)} stories
 - sentiment: POSITIVE if good for investors, NEGATIVE if bad, NEUTRAL if mixed/routine
-- sentiment_reasoning: Explain your sentiment in plain language
+- Keep summaries and reasoning concise
 
-Return ONLY the JSON object, no markdown code fences or additional text."""
+Return ONLY the JSON array, no markdown code fences or additional text."""
 
     try:
         google_api_key = os.getenv("GOOGLE_API_KEY")
@@ -388,10 +451,11 @@ Return ONLY the JSON object, no markdown code fences or additional text."""
         llm = ChatGoogleGenerativeAI(
             model=model_name,
             temperature=0,
-            timeout=30,
+            timeout=60,  # Longer timeout for batch processing
             google_api_key=google_api_key
         )
 
+        logger.info(f"Sending batched analysis request for {len(story_groups)} stories")
         response = llm.invoke(prompt)
         response_text = response.content.strip()
 
@@ -400,35 +464,67 @@ Return ONLY the JSON object, no markdown code fences or additional text."""
         response_text = re.sub(r'\n?```\s*$', '', response_text)
         response_text = response_text.strip()
 
-        analysis = json.loads(response_text)
+        analyses = json.loads(response_text)
 
-        # Calculate confidence score
-        # Base: 40 for single source, +20 per additional source (max 80)
-        # +20 if confirmed (≥2 trusted sources)
-        source_count = len(story_group["sources"])
-        confidence = min(40 + (source_count - 1) * 20, 80)
-        if story_group.get("confirmed"):
-            confidence += 20
+        # Map analyses back to story groups
+        analyzed_groups = []
+        for idx, group in enumerate(story_groups):
+            # Find matching analysis by story_number
+            analysis = next((a for a in analyses if a.get("story_number") == idx + 1), None)
 
-        confidence = min(100, confidence)
+            if not analysis:
+                logger.warning(f"No analysis returned for story {idx + 1}")
+                continue
 
-        return {
-            "representative_title": story_group["representative_title"],
-            "summary": analysis.get("summary", "")[:120],
-            "sentiment": analysis.get("sentiment", "NEUTRAL").upper(),
-            "sentiment_reasoning": analysis.get("sentiment_reasoning", "")[:200],
-            "confidence_score": confidence,
-            "sources": story_group["sources"],
-            "urls": story_group["urls"],
-            "source_tiers": story_group["source_tiers"],
-            "trusted_sources": story_group.get("trusted_sources", []),
-            "trusted_count": story_group.get("trusted_count", 0),
-            "confirmed": story_group.get("confirmed", False),
-        }
+            # Calculate confidence score
+            source_count = len(group["sources"])
+            confidence = min(40 + (source_count - 1) * 20, 80)
+            if group.get("confirmed"):
+                confidence += 20
+            confidence = min(100, confidence)
+
+            analyzed_groups.append({
+                "representative_title": group["representative_title"],
+                "summary": analysis.get("summary", "")[:120],
+                "sentiment": analysis.get("sentiment", "NEUTRAL").upper(),
+                "sentiment_reasoning": analysis.get("sentiment_reasoning", "")[:200],
+                "confidence_score": confidence,
+                "sources": group["sources"],
+                "urls": group["urls"],
+                "source_tiers": group["source_tiers"],
+                "trusted_sources": group.get("trusted_sources", []),
+                "trusted_count": group.get("trusted_count", 0),
+                "confirmed": group.get("confirmed", False),
+            })
+
+        logger.info(f"Successfully analyzed {len(analyzed_groups)}/{len(story_groups)} stories in batch")
+        return analyzed_groups
 
     except Exception as e:
-        logger.error(f"Story group analysis failed: {e}")
-        return None
+        logger.error(f"Batch story analysis failed: {e}")
+        # Fallback: return groups without LLM analysis
+        fallback_groups = []
+        for group in story_groups:
+            source_count = len(group["sources"])
+            confidence = min(40 + (source_count - 1) * 20, 80)
+            if group.get("confirmed"):
+                confidence += 20
+            confidence = min(100, confidence)
+
+            fallback_groups.append({
+                "representative_title": group["representative_title"],
+                "summary": group["representative_title"][:120],
+                "sentiment": "NEUTRAL",
+                "sentiment_reasoning": "Analysis failed - using headline as fallback",
+                "confidence_score": confidence,
+                "sources": group["sources"],
+                "urls": group["urls"],
+                "source_tiers": group["source_tiers"],
+                "trusted_sources": group.get("trusted_sources", []),
+                "trusted_count": group.get("trusted_count", 0),
+                "confirmed": group.get("confirmed", False),
+            })
+        return fallback_groups
 
 
 def _compute_aggregates(result: Dict, story_groups: List[Dict]):

@@ -76,20 +76,26 @@ def compute_technical_indicators(ticker: str, period: str = "1y", cached_price_h
     from backend.tools.financial_tools import get_price_history
 
     try:
-        # Use cached price history if provided, otherwise fetch
-        if cached_price_history is not None and "error" not in cached_price_history:
-            logger.info("Using cached price history from workflow state")
-            price_data = cached_price_history
+        # Use cached price history if provided (don't refetch on cache failure)
+        if cached_price_history is not None:
+            if "error" not in cached_price_history:
+                logger.info("Using cached price history from workflow state")
+                price_data = cached_price_history
+            else:
+                logger.error(f"Cached price history has error: {cached_price_history['error']}")
+                return {
+                    "error": f"Price data unavailable: {cached_price_history['error']}",
+                    "ticker": ticker
+                }
         else:
-            logger.info("Fetching price history (cache not available)")
+            logger.info("Fetching price history (cache not provided)")
             price_data = get_price_history.func(ticker, period)
-
-        if "error" in price_data:
-            logger.error(f"Cannot fetch price data for {ticker}: {price_data['error']}")
-            return {
-                "error": f"Price data unavailable: {price_data['error']}",
-                "ticker": ticker
-            }
+            if "error" in price_data:
+                logger.error(f"Cannot fetch price data for {ticker}: {price_data['error']}")
+                return {
+                    "error": f"Price data unavailable: {price_data['error']}",
+                    "ticker": ticker
+                }
 
         # Convert to DataFrame
         df = pd.DataFrame({
