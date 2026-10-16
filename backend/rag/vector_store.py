@@ -189,3 +189,13 @@ class FAISSVectorStore:
     def count(self) -> int:
         """Get the number of documents in the store."""
         return self.index.ntotal
+
+    @property
+    def texts(self) -> List[str]:
+        """Get all document texts."""
+        return [doc["text"] for doc in self.documents]
+
+    @property
+    def metadata(self) -> List[Dict[str, Any]]:
+        """Get all document metadata."""
+        return [doc["metadata"] for doc in self.documents]

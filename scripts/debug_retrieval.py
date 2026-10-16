@@ -59,12 +59,12 @@ def debug_retrieval(company: str, query: str):
 
     # Normalize company name
     company_normalized = _normalize_company_name(company)
-    print(f"✓ Normalized company name: '{company}' → '{company_normalized}'")
+    print(f"[OK] Normalized company name: '{company}' -> '{company_normalized}'")
 
     # Check if index exists
     company_store_path = VECTOR_STORE_DIR / company_normalized
     if not company_store_path.exists():
-        print(f"✗ ERROR: No index found at {company_store_path}")
+        print(f"[ERROR] No index found at {company_store_path}")
         print(f"\nAvailable indexes:")
         if VECTOR_STORE_DIR.exists():
             for idx_dir in VECTOR_STORE_DIR.iterdir():
@@ -75,19 +75,19 @@ def debug_retrieval(company: str, query: str):
         return
 
     if not (company_store_path / "index.faiss").exists():
-        print(f"✗ ERROR: Index for {company_normalized} is incomplete (no index.faiss)")
+        print(f"[ERROR] Index for {company_normalized} is incomplete (no index.faiss)")
         return
 
-    print(f"✓ Index found at {company_store_path}")
+    print(f"[OK] Index found at {company_store_path}")
 
     # Load vector store
     try:
         vector_store = FAISSVectorStore.load(company_store_path)
-        print(f"✓ Vector store loaded")
+        print(f"[OK] Vector store loaded")
         print(f"  - Total chunks indexed: {vector_store.index.ntotal}")
         print(f"  - Dimension: {vector_store.index.d}")
     except Exception as e:
-        print(f"✗ ERROR loading vector store: {e}")
+        print(f"[ERROR] Loading vector store: {e}")
         return
 
     # Check metadata
@@ -115,24 +115,24 @@ def debug_retrieval(company: str, query: str):
     try:
         google_api_key = os.getenv("GOOGLE_API_KEY")
         if not google_api_key:
-            print(f"✗ ERROR: GOOGLE_API_KEY not set")
+            print(f"[ERROR] GOOGLE_API_KEY not set")
             return
 
         embed_model = GeminiEmbedding(
             api_key=google_api_key,
             model_name="models/gemini-embedding-001"
         )
-        print(f"✓ Embedding model: gemini-embedding-001")
+        print(f"[OK] Embedding model: gemini-embedding-001")
         print(f"  - Task type: RETRIEVAL_QUERY")
 
         # Generate query embedding
         query_embedding = embed_model.embed_query(query)
-        print(f"✓ Query embedding generated")
+        print(f"[OK] Query embedding generated")
         print(f"  - Dimension: {len(query_embedding)}")
         print(f"  - Sample values: {query_embedding[:5]}")
 
     except Exception as e:
-        print(f"✗ ERROR generating query embedding: {e}")
+        print(f"[ERROR] Generating query embedding: {e}")
         import traceback
         traceback.print_exc()
         return
@@ -188,7 +188,7 @@ def debug_retrieval(company: str, query: str):
             print(f"  Chunk {idx} company: '{stored_company}'")
 
     except Exception as e:
-        print(f"✗ ERROR during raw search: {e}")
+        print(f"[ERROR] During raw search: {e}")
         import traceback
         traceback.print_exc()
         return
@@ -198,19 +198,19 @@ def debug_retrieval(company: str, query: str):
     print(f"{'='*80}")
 
     if vector_store.index.ntotal == 0:
-        print("✗ Index is empty - no chunks indexed")
+        print("[ERROR] Index is empty - no chunks indexed")
     elif len(distances[0]) == 0 or distances[0][0] > 1.0:
-        print("✗ No relevant chunks found (all distances > 1.0)")
+        print("[ERROR] No relevant chunks found (all distances > 1.0)")
         print("  Possible causes:")
         print("  - Query embedding dimension mismatch")
         print("  - Different task_type at ingestion vs query")
         print("  - Index corrupted")
     elif matching_chunks == 0:
-        print("✗ Company filter mismatch")
+        print("[ERROR] Company filter mismatch")
         print(f"  Expected: '{company}'")
         print(f"  Found in index: {set(m.get('company', 'N/A') for m in vector_store.metadata[:10])}")
     else:
-        print("✓ Retrieval appears to be working")
+        print("[OK] Retrieval appears to be working")
         print(f"  - Found {k} results")
         print(f"  - Top distance: {distances[0][0]:.4f}")
         print(f"  - Matching chunks: {matching_chunks}")

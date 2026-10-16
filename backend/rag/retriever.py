@@ -10,8 +10,12 @@ import os
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
+from dotenv import load_dotenv
 from backend.rag.gemini_embedding import GeminiEmbedding
 from backend.rag.vector_store import FAISSVectorStore
+
+# Load environment variables
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
