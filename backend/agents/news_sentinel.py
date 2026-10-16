@@ -225,16 +225,29 @@ def run_news_sentinel(
             confirmed_groups = [g for g in analyzed_groups_sorted if g.get("confirmed")]
             unconfirmed_groups = [g for g in analyzed_groups_sorted if not g.get("confirmed")]
 
+            # Get stories from trusted sources (even if single-source, when not in trusted_only mode)
+            trusted_single_source = [g for g in unconfirmed_groups if g.get("trusted_count", 0) >= 1]
+
             if confirmed_groups:
+                # Best case: we have multi-source confirmed stories
                 _compute_aggregates(result, confirmed_groups)
                 result["status"] = "ok"
+            elif trusted_single_source and not trusted_only:
+                # Fallback: use single-source trusted stories when trusted_only=False
+                logger.info(f"No confirmed stories, but {len(trusted_single_source)} from trusted sources (single-source)")
+                _compute_aggregates(result, trusted_single_source)
+                result["status"] = "ok"
+                result["confidence_note"] = "Based on single-source reports from trusted outlets"
+            elif unconfirmed_groups:
+                # Last resort: compute from all unconfirmed stories to show *something*
+                logger.warning("No confirmed or trusted stories, using all available stories for sentiment")
+                _compute_aggregates(result, unconfirmed_groups)
+                result["status"] = "partial"
+                result["error"] = f"Sentiment based on unverified sources ({len(unconfirmed_groups)} stories)"
             else:
-                logger.warning("No confirmed stories found")
+                logger.warning("No stories to analyze")
                 result["status"] = "partial"
                 result["error"] = f"No confirmed stories - all from unverified sources or single-source reports ({len(unconfirmed_groups)} unconfirmed)"
-
-                # Still show unconfirmed stories but don't compute aggregates from them
-                # Aggregates remain at their default neutral values
 
             # Save story IDs as seen (only if dedup was used)
             if use_history_dedup and not disable_dedup:
@@ -525,7 +538,7 @@ Return ONLY the JSON array, no markdown code fences or additional text."""
 
     except Exception as e:
         logger.error(f"Batch story analysis failed: {e}")
-        # Fallback: return groups without LLM analysis
+        # Fallback: return groups with rule-based sentiment analysis
         fallback_groups = []
         for group in story_groups:
             source_count = len(group["sources"])
@@ -534,11 +547,31 @@ Return ONLY the JSON array, no markdown code fences or additional text."""
                 confidence += 20
             confidence = min(100, confidence)
 
+            # Rule-based sentiment from headline keywords
+            title = group["representative_title"].lower()
+            sentiment = "NEUTRAL"
+            reasoning = "Based on headline keywords (LLM unavailable)"
+
+            # Positive keywords
+            positive_words = ["surge", "soar", "jump", "gain", "profit", "rise", "growth", "bullish",
+                             "upside", "target", "positive", "strong", "record", "boost", "ipo"]
+            # Negative keywords
+            negative_words = ["fall", "drop", "decline", "loss", "bearish", "downside", "concern",
+                             "weak", "plunge", "crash", "risk", "warning", "miss"]
+
+            pos_count = sum(1 for word in positive_words if word in title)
+            neg_count = sum(1 for word in negative_words if word in title)
+
+            if pos_count > neg_count and pos_count > 0:
+                sentiment = "POSITIVE"
+            elif neg_count > pos_count and neg_count > 0:
+                sentiment = "NEGATIVE"
+
             fallback_groups.append({
                 "representative_title": group["representative_title"],
                 "summary": group["representative_title"][:120],
-                "sentiment": "NEUTRAL",
-                "sentiment_reasoning": "Analysis failed - using headline as fallback",
+                "sentiment": sentiment,
+                "sentiment_reasoning": reasoning,
                 "confidence_score": confidence,
                 "sources": group["sources"],
                 "urls": group["urls"],
@@ -547,6 +580,7 @@ Return ONLY the JSON array, no markdown code fences or additional text."""
                 "trusted_count": group.get("trusted_count", 0),
                 "confirmed": group.get("confirmed", False),
             })
+        logger.info(f"Using rule-based sentiment for {len(fallback_groups)} stories")
         return fallback_groups
 
 
