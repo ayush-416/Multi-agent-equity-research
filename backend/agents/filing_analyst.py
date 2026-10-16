@@ -11,43 +11,12 @@ import re
 import os
 from typing import Dict, Any, List, Optional
 
-from langchain_google_genai import ChatGoogleGenerativeAI
+from backend.llm import get_llm
 from backend.rag.retriever import retrieve_for_query
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# Singleton instances for LLM and embedding client (loaded once)
-_llm_instance: Optional[ChatGoogleGenerativeAI] = None
-_embedding_client = None  # Will be initialized in retriever
-
-
-def _get_llm() -> ChatGoogleGenerativeAI:
-    """
-    Get or create singleton LLM instance.
-
-    Returns:
-        ChatGoogleGenerativeAI instance
-    """
-    global _llm_instance
-
-    if _llm_instance is None:
-        google_api_key = os.getenv("GOOGLE_API_KEY")
-        if not google_api_key:
-            raise ValueError("GOOGLE_API_KEY environment variable not set")
-
-        # Use configurable model (defaults to gemini-2.5-flash for free tier)
-        model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-
-        _llm_instance = ChatGoogleGenerativeAI(
-            model=model_name,
-            temperature=0,
-            google_api_key=google_api_key
-        )
-        logger.info(f"Initialized LLM singleton: {model_name}")
-
-    return _llm_instance
 
 
 def run_filing_analyst(ticker: str, company_name: str) -> Dict[str, Any]:
@@ -124,7 +93,7 @@ def run_filing_analyst(ticker: str, company_name: str) -> Dict[str, Any]:
         # Check if we have any context
         if not all_contexts:
             logger.warning(f"No filing context retrieved for {company_name}")
-            result["status"] = "partial_success"
+            result["status"] = "no_data"
             result["rag_status"] = "not_available"
             result["context_retrieved"] = False
             result["filing_summary"] = f"No indexed filings found for {company_name}"
@@ -174,9 +143,9 @@ Instructions:
 
 Return ONLY the JSON object, no markdown code fences or additional text."""
 
-        # Call LLM (use singleton instance)
+        # Call LLM
         try:
-            llm = _get_llm()
+            llm = get_llm(temperature=0)
 
             logger.info("Calling Gemini LLM for analysis")
             response = llm.invoke(prompt)

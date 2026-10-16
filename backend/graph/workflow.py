@@ -319,7 +319,7 @@ def _news_sentinel_node(state: FinSightState) -> Dict[str, Any]:
     logger.info(f"Running news_sentinel for {state['ticker']}")
 
     try:
-        result = run_news_sentinel(state["ticker"], state["company_name"])
+        result = run_news_sentinel(state["ticker"], state["company_name"], use_history_dedup=False)
 
         if result.get("status") == "error":
             error_msg = f"news_sentinel error: {result.get('error', 'unknown')}"

@@ -155,8 +155,9 @@ def run_risk_assessor(
 
         # Check if we have any data
         if not (has_price_data or has_stock_info):
-            result["error"] = "Unable to fetch any financial data"
-            result["status"] = "error"
+            result["error"] = "Unable to fetch any financial data for risk assessment"
+            result["status"] = "no_data"
+            result["unavailable_metrics"] = ["all metrics - no price or fundamental data available"]
             return result
 
         # === 4. Calculate market risk metrics ===
@@ -319,13 +320,20 @@ def run_risk_assessor(
             company_name, risk_score, result["risk_level"], metrics, risk_factors, risk_flags
         )
 
-        # Set final status
-        if has_price_data and has_stock_info:
+        # Set final status based on data quality
+        available_metrics = len([m for m in metrics.values() if m is not None])
+        total_possible = 10  # Rough count of key metrics we try to calculate
+
+        if available_metrics < 3:
+            result["status"] = "partial"
+            result["error"] = f"Limited risk metrics: only {available_metrics} available. Need price and fundamental data."
+            logger.warning(f"Risk assessment has limited data: {available_metrics} metrics")
+        elif has_price_data and has_stock_info:
             result["status"] = "success"
             logger.info(f"Risk assessment completed: {result['risk_level']} ({risk_score:.0f}/100)")
         else:
             result["status"] = "partial_success"
-            result["error"] = "Some data sources unavailable"
+            result["error"] = f"Some data sources unavailable: price_data={has_price_data}, stock_info={has_stock_info}"
             logger.info("Risk assessment completed with partial data")
 
     except Exception as e:

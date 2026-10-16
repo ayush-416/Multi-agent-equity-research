@@ -44,6 +44,7 @@ def get_verdict_config() -> Dict[str, Any]:
 def score_news_component(news_output: Optional[Dict[str, Any]]) -> Tuple[float, str, List[str], bool]:
     """
     Score news sentiment from confirmed stories only.
+    Confirmed stories weighted 100%, unconfirmed weighted 30%.
 
     Args:
         news_output: Output from news_sentinel agent
@@ -55,8 +56,8 @@ def score_news_component(news_output: Optional[Dict[str, Any]]) -> Tuple[float, 
         - drivers: list of 2-4 explanation strings
         - available: True if data was available
     """
-    if not news_output or news_output.get("status") == "error":
-        return 0.0, "Unavailable", ["News data could not be fetched"], False
+    if not news_output or news_output.get("status") in ["error", "no_data"]:
+        return 0.0, "Unavailable", ["News data could not be fetched or no articles found"], False
 
     drivers = []
 
@@ -65,7 +66,7 @@ def score_news_component(news_output: Optional[Dict[str, Any]]) -> Tuple[float, 
     days_back = config.get("days_back", 7)
     trusted_only = config.get("trusted_only", False)
 
-    # Only use confirmed stories
+    # Separate confirmed and unconfirmed stories
     story_groups = news_output.get("story_groups", [])
     confirmed_stories = [s for s in story_groups if s.get("confirmed")]
     unconfirmed_stories = [s for s in story_groups if not s.get("confirmed")]
@@ -77,14 +78,14 @@ def score_news_component(news_output: Optional[Dict[str, Any]]) -> Tuple[float, 
     drivers.append(config_info)
 
     if not confirmed_stories:
-        # Show that we have stories but none confirmed
+        # Show that we have stories but none confirmed - NOT AVAILABLE
         if unconfirmed_stories:
             drivers.append(f"{len(unconfirmed_stories)} unconfirmed stories (not scored)")
         else:
             drivers.append("No recent news coverage")
-        return 0.0, "Neutral", drivers, True
+        return 0.0, "Neutral", drivers, False  # Changed to False - don't count as available
 
-    # Calculate weighted sentiment from confirmed stories only
+    # Calculate weighted sentiment from confirmed stories (100%) + unconfirmed (30%)
     total_weight = 0.0
     total_weighted_score = 0.0
 
@@ -92,6 +93,7 @@ def score_news_component(news_output: Optional[Dict[str, Any]]) -> Tuple[float, 
     negative_count = 0
     neutral_count = 0
 
+    # Confirmed stories: full weight
     for story in confirmed_stories:
         sentiment = story.get("sentiment", "").lower()
         confidence = story.get("confidence_score", 0.5)  # 0 to 1
@@ -111,6 +113,22 @@ def score_news_component(news_output: Optional[Dict[str, Any]]) -> Tuple[float, 
         total_weighted_score += weighted_score
         total_weight += confidence
 
+    # Unconfirmed stories: 30% weight
+    for story in unconfirmed_stories:
+        sentiment = story.get("sentiment", "").lower()
+        confidence = story.get("confidence_score", 0.5) * 0.3  # 30% weight
+
+        if sentiment in ["positive", "bullish"]:
+            story_score = 1.0
+        elif sentiment in ["negative", "bearish"]:
+            story_score = -1.0
+        else:
+            story_score = 0.0
+
+        weighted_score = story_score * confidence
+        total_weighted_score += weighted_score
+        total_weight += confidence
+
     # Calculate average weighted sentiment
     if total_weight > 0:
         avg_sentiment = total_weighted_score / total_weight
@@ -118,12 +136,13 @@ def score_news_component(news_output: Optional[Dict[str, Any]]) -> Tuple[float, 
         avg_sentiment = 0.0
 
     # Scale to -3 to +3 range
-    # At full negative (-1.0), score = -3.0
-    # At full positive (+1.0), score = +3.0
     score = avg_sentiment * 3.0
 
     # Generate drivers
-    drivers.append(f"{len(confirmed_stories)} confirmed stories analyzed")
+    if unconfirmed_stories:
+        drivers.append(f"{len(confirmed_stories)} confirmed + {len(unconfirmed_stories)} unconfirmed (30% weight)")
+    else:
+        drivers.append(f"{len(confirmed_stories)} confirmed stories analyzed")
 
     if positive_count > 0:
         drivers.append(f"✓ {positive_count} positive/bullish stories")
@@ -131,9 +150,6 @@ def score_news_component(news_output: Optional[Dict[str, Any]]) -> Tuple[float, 
         drivers.append(f"✗ {negative_count} negative/bearish stories")
     if neutral_count > 0:
         drivers.append(f"→ {neutral_count} neutral stories")
-
-    # Add sentiment score
-    drivers.append(f"Weighted sentiment: {avg_sentiment:.2f}")
 
     # Determine label
     if score >= 2.0:

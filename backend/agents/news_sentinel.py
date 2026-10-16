@@ -16,7 +16,7 @@ from collections import defaultdict
 from difflib import SequenceMatcher
 
 from dotenv import load_dotenv
-from langchain_google_genai import ChatGoogleGenerativeAI
+from backend.llm import get_llm
 from backend.tools.news_tools import fetch_google_news
 from backend.config.news_config import is_trusted_source, get_source_tier
 
@@ -35,7 +35,8 @@ def run_news_sentinel(
     ticker: str,
     company_name: str,
     days_back: Optional[int] = None,
-    trusted_only: Optional[bool] = None
+    trusted_only: Optional[bool] = None,
+    use_history_dedup: bool = False
 ) -> Dict[str, Any]:
     """
     Analyze recent news sentiment and themes for a company with source verification.
@@ -45,14 +46,16 @@ def run_news_sentinel(
         company_name: Full company name (e.g., "Reliance Industries")
         days_back: Number of days to look back for news (default: from env or 7)
         trusted_only: Only use trusted sources for scoring (default: from env or False)
+        use_history_dedup: Apply seen-stories deduplication (default: False for /analyze, True for watchlist)
 
     Returns:
         Dict with keys:
-        - status: "success", "partial_success", or "error"
+        - status: "success", "partial_success", "no_data", or "error"
         - ticker: Stock ticker
         - company_name: Company name
         - article_count: Total number of articles fetched
-        - story_groups: List of deduplicated story groups with verification
+        - raw_articles: List of all articles with title, source, date, url
+        - story_groups: List of ALL analyzed story groups (confirmed and unconfirmed)
         - confirmed_count: Number of confirmed story groups
         - unconfirmed_count: Number of unconfirmed story groups
         - sentiment: Aggregate sentiment from confirmed stories (POSITIVE/NEGATIVE/NEUTRAL/MIXED/UNKNOWN)
@@ -63,7 +66,7 @@ def run_news_sentinel(
         - notable_headlines: Most important headlines from confirmed stories
         - sources: All source links
         - error: Error message if applicable
-        - config: Configuration used (days_back, trusted_only)
+        - config: Configuration used (days_back, trusted_only, use_history_dedup)
     """
     # Load configuration from environment if not provided
     if days_back is None:
@@ -82,6 +85,7 @@ def run_news_sentinel(
         "ticker": ticker,
         "company_name": company_name,
         "article_count": 0,
+        "raw_articles": [],
         "story_groups": [],
         "confirmed_count": 0,
         "unconfirmed_count": 0,
@@ -96,24 +100,36 @@ def run_news_sentinel(
         "config": {
             "days_back": days_back,
             "trusted_only": trusted_only,
-            "disable_dedup": disable_dedup
+            "disable_dedup": disable_dedup,
+            "use_history_dedup": use_history_dedup
         }
     }
 
     try:
         logger.info(f"Starting news sentinel for {ticker} ({company_name})")
-        logger.info(f"Config: days_back={days_back}, trusted_only={trusted_only}")
+        logger.info(f"Config: days_back={days_back}, trusted_only={trusted_only}, use_history_dedup={use_history_dedup}")
 
         # Fetch news articles
         articles = fetch_google_news(company_name, ticker, limit=20)
 
         if not articles:
             logger.warning(f"No news articles found for {company_name}")
-            result["status"] = "partial_success"
-            result["error"] = "No recent news articles found"
+            result["status"] = "no_data"
+            result["error"] = f"No news articles found for {company_name} in the last {days_back} days (source: Google News RSS)"
             return result
 
         logger.info(f"Fetched {len(articles)} raw articles")
+
+        # Store raw articles for output
+        result["raw_articles"] = [
+            {
+                "title": article.get("title", ""),
+                "source": article.get("source", ""),
+                "published_date": article.get("published_date", ""),
+                "url": article.get("link", "")
+            }
+            for article in articles
+        ]
 
         # Filter by date window
         cutoff_date = datetime.utcnow() - timedelta(days=days_back)
@@ -144,21 +160,26 @@ def run_news_sentinel(
 
             articles_filtered = articles_trusted
 
-        # Load seen stories for this company (skip if dedup disabled)
-        if disable_dedup:
-            logger.info("News deduplication disabled (NEWS_DISABLE_DEDUP=true)")
-            articles_new = articles_filtered
-        else:
+        # Load seen stories for this company (only if use_history_dedup is True AND not disabled by env)
+        if use_history_dedup and not disable_dedup:
+            logger.info("History deduplication enabled (watchlist mode)")
             seen_stories = _load_seen_stories(ticker)
             # Filter out already-seen stories
             articles_new = _filter_seen_stories(articles_filtered, seen_stories)
             logger.info(f"After dedup with history: {len(articles_new)} new articles")
+        else:
+            if disable_dedup:
+                logger.info("History deduplication disabled (NEWS_DISABLE_DEDUP=true)")
+            else:
+                logger.info("History deduplication skipped (/analyze mode)")
+            articles_new = articles_filtered
+            seen_stories = []
 
         if not articles_new:
-            logger.info(f"All articles already seen for {ticker}")
-            result["status"] = "partial_success"
+            logger.info(f"All articles already seen for {ticker} (or filtered out)")
+            result["status"] = "no_data"
             result["article_count"] = len(articles)
-            result["error"] = "All articles already processed in prior runs"
+            result["error"] = "All articles already processed in prior runs (or filtered by trust filter)"
             return result
 
         result["article_count"] = len(articles_new)
@@ -189,29 +210,31 @@ def run_news_sentinel(
         # Analyze story groups in ONE batched LLM call
         analyzed_groups = _analyze_story_groups_batch(story_groups_to_analyze, company_name, ticker)
 
-        result["story_groups"] = analyzed_groups
-        result["confirmed_count"] = sum(1 for g in analyzed_groups if g.get("confirmed"))
-        result["unconfirmed_count"] = sum(1 for g in analyzed_groups if not g.get("confirmed"))
+        # Return ALL analyzed groups (both confirmed and unconfirmed), sorted confirmed first
+        analyzed_groups_sorted = sorted(analyzed_groups, key=lambda g: (not g.get("confirmed", False), -len(g.get("sources", []))))
+
+        result["story_groups"] = analyzed_groups_sorted
+        result["confirmed_count"] = sum(1 for g in analyzed_groups_sorted if g.get("confirmed"))
+        result["unconfirmed_count"] = sum(1 for g in analyzed_groups_sorted if not g.get("confirmed"))
 
         logger.info(f"Analysis complete: {result['confirmed_count']} confirmed, {result['unconfirmed_count']} unconfirmed")
 
         # Compute aggregate metrics from CONFIRMED stories only
-        confirmed_groups = [g for g in analyzed_groups if g.get("confirmed")]
+        confirmed_groups = [g for g in analyzed_groups_sorted if g.get("confirmed")]
 
         if confirmed_groups:
             _compute_aggregates(result, confirmed_groups)
             result["status"] = "success"
         else:
             logger.warning("No confirmed stories found")
-            result["status"] = "partial_success"
-            result["error"] = "No confirmed stories (all from unverified sources or single source)"
+            result["status"] = "partial"
+            result["error"] = f"No confirmed stories - all from unverified sources or single-source reports ({len(unconfirmed_stories)} unconfirmed)"
 
-            # Still compute aggregates from all stories for partial_success
-            if analyzed_groups:
-                _compute_aggregates(result, analyzed_groups)
+            # Still show unconfirmed stories but don't compute aggregates from them
+            # Aggregates remain at their default neutral values
 
-        # Save story IDs as seen (skip if dedup disabled)
-        if not disable_dedup:
+        # Save story IDs as seen (only if dedup was used)
+        if use_history_dedup and not disable_dedup:
             new_seen_ids = [_story_id(article) for article in articles_new]
             _save_seen_stories(ticker, seen_stories + new_seen_ids)
 
@@ -441,19 +464,8 @@ Guidelines:
 Return ONLY the JSON array, no markdown code fences or additional text."""
 
     try:
-        google_api_key = os.getenv("GOOGLE_API_KEY")
-        if not google_api_key:
-            raise ValueError("GOOGLE_API_KEY environment variable not set")
-
-        # Use configurable model (defaults to gemini-2.5-flash for free tier)
-        model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-
-        llm = ChatGoogleGenerativeAI(
-            model=model_name,
-            temperature=0,
-            timeout=60,  # Longer timeout for batch processing
-            google_api_key=google_api_key
-        )
+        # Use centralized LLM with fallback
+        llm = get_llm(temperature=0)
 
         logger.info(f"Sending batched analysis request for {len(story_groups)} stories")
         response = llm.invoke(prompt)

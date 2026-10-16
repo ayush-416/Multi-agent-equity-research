@@ -3,6 +3,8 @@ Ratio Cruncher Agent: Computes and analyzes financial ratios using real data.
 
 Fetches stock fundamentals, calculates ratios, compares against sector benchmarks,
 and provides strengths/concerns analysis based on computed metrics.
+
+Falls back to scraper data when yfinance fails.
 """
 
 import logging
@@ -66,7 +68,12 @@ def run_ratio_cruncher(
                 stock_info = cached_stock_info
             else:
                 logger.error(f"Cached stock info has error: {cached_stock_info['error']}")
+                # Try india_financials fallback
+                fallback_result = _try_india_financials_fallback(ticker, company_name)
+                if fallback_result:
+                    return fallback_result
                 result["error"] = f"Stock data unavailable: {cached_stock_info['error']}"
+                result["status"] = "no_data"
                 return result
         else:
             logger.info("Fetching stock info (cache not available)")
@@ -74,8 +81,19 @@ def run_ratio_cruncher(
 
         if "error" in stock_info:
             logger.error(f"Failed to fetch stock info: {stock_info['error']}")
+            # Try india_financials fallback
+            fallback_result = _try_india_financials_fallback(ticker, company_name)
+            if fallback_result:
+                return fallback_result
             result["error"] = f"Stock data unavailable: {stock_info['error']}"
+            result["status"] = "no_data"
             return result
+
+        # Check currency mismatch
+        currency = stock_info.get("currency", "INR")
+        if currency != "INR":
+            logger.warning(f"Data is in {currency}, not INR - may not align with Indian stock prices")
+            result["currency_warning"] = f"Financial data is in {currency}, not INR"
 
         # Extract sector if not provided
         if not sector and stock_info.get("sector"):
@@ -106,7 +124,29 @@ def run_ratio_cruncher(
         }
 
         result["ratios"] = ratios
-        logger.info(f"Extracted {len([v for v in ratios.values() if v is not None])} ratios")
+        result["source"] = stock_info.get("source", "unknown")
+        result["as_of"] = stock_info.get("as_of")
+
+        # Check if we have any meaningful data
+        non_null_ratios = {k: v for k, v in ratios.items() if v is not None}
+        if not non_null_ratios:
+            logger.warning(f"No ratios available for {ticker}")
+            result["status"] = "no_data"
+            result["error"] = f"No financial ratios available (source: {result['source']})"
+            return result
+
+        # Check for minimum key ratios (need at least 3 core metrics)
+        key_ratios = ["pe_ratio", "pb_ratio", "roe_pct", "debt_to_equity", "profit_margins_pct", "current_ratio"]
+        available_key_ratios = [k for k in key_ratios if ratios.get(k) is not None]
+
+        if len(available_key_ratios) < 3:
+            logger.warning(f"Insufficient key ratios for {ticker}: only {len(available_key_ratios)} available")
+            result["status"] = "partial"
+            result["error"] = f"Limited ratio data: only {len(available_key_ratios)} key ratios available (source: {result['source']})"
+            # Continue with analysis but flag as partial
+        else:
+            logger.info(f"Extracted {len(non_null_ratios)} ratios ({len(available_key_ratios)} key ratios)")
+
 
         # Fetch sector benchmarks if sector is available
         sector_benchmarks = {}
@@ -132,14 +172,16 @@ def run_ratio_cruncher(
             ratios, sector_benchmarks, company_name
         )
 
-        # Set final status
-        if sector_benchmarks:
-            result["status"] = "success"
-            logger.info(f"Ratio analysis completed successfully for {ticker}")
-        else:
-            result["status"] = "partial_success"
-            result["error"] = "Sector benchmarks unavailable"
-            logger.info(f"Ratio analysis completed with partial success (no sector benchmarks)")
+        # Set final status (preserve "partial" if already set)
+        if result["status"] != "partial":
+            if sector_benchmarks:
+                result["status"] = "success"
+                logger.info(f"Ratio analysis completed successfully for {ticker}")
+            else:
+                result["status"] = "partial_success"
+                if not result.get("error"):
+                    result["error"] = "Sector benchmarks unavailable"
+                logger.info(f"Ratio analysis completed with partial success (no sector benchmarks)")
 
     except Exception as e:
         logger.error(f"Ratio analysis failed for {ticker}: {e}", exc_info=True)
@@ -256,10 +298,13 @@ def _analyze_ratios(
     if div_yield is not None and div_yield > 2:
         strengths.append(f"Attractive dividend yield of {div_yield:.1f}%")
 
-    # Add generic messages if lists are empty
-    if not strengths:
-        strengths.append("Limited ratio data available for analysis")
-    if not concerns:
+    # Don't add generic messages if we have no data at all
+    # Only add them if we have SOME ratios but no clear signals
+    has_any_ratios = any(v is not None for v in ratios.values())
+
+    if not strengths and has_any_ratios:
+        strengths.append("No standout positive ratio signals identified")
+    if not concerns and has_any_ratios:
         concerns.append("No major concerns identified in available ratios")
 
     return strengths, concerns
@@ -279,6 +324,11 @@ def _generate_valuation_summary(
         Valuation summary string
     """
     summary_parts = []
+
+    # Check if we have any ratios at all
+    has_any_ratios = any(v is not None for v in ratios.values())
+    if not has_any_ratios:
+        return "No financial ratio data available for valuation assessment"
 
     # Market cap context
     market_cap_cr = ratios.get("market_cap_cr")
@@ -328,6 +378,180 @@ def _generate_valuation_summary(
             summary_parts.append("and elevated leverage levels")
 
     if not summary_parts:
-        return "Limited financial data available for valuation assessment"
+        # We have some ratios but couldn't build a summary
+        available_fields = [k for k, v in ratios.items() if v is not None]
+        return f"Limited financial data available (found: {', '.join(available_fields[:3])})"
 
     return ". ".join(summary_parts) + "."
+
+
+def _try_india_financials_fallback(ticker: str, company_name: str) -> Optional[Dict[str, Any]]:
+    """
+    Try to get ratios from india_financials (Screener) when yfinance fails.
+
+    Args:
+        ticker: Stock ticker
+        company_name: Company name
+
+    Returns:
+        Complete ratio_cruncher result dict or None
+    """
+    try:
+        from backend.scraper.india_financials import get_financials
+
+        logger.info(f"Attempting india_financials fallback for {ticker}")
+
+        # Extract base ticker (remove .NS/.BO suffix)
+        base_ticker = ticker.replace(".NS", "").replace(".BO", "")
+
+        scraper_data = get_financials(base_ticker, source="screener")
+
+        if not scraper_data or not scraper_data.get("tables"):
+            logger.warning(f"No india_financials data available for {ticker}")
+            return None
+
+        tables = scraper_data.get("tables", {})
+        currency = scraper_data.get("currency", "INR")
+
+        # Extract ratios from Screener ratios table
+        ratios_table = tables.get("S_Ratios")
+        if not ratios_table:
+            logger.warning(f"No ratios table in india_financials data for {ticker}")
+            return None
+
+        # Parse ratios
+        ratios = _parse_india_financials_ratios(ratios_table)
+
+        if not ratios:
+            logger.warning(f"Could not parse ratios from india_financials data for {ticker}")
+            return None
+
+        logger.info(f"Extracted {len(ratios)} ratios from india_financials (currency: {currency})")
+
+        # Extract sector from company info if available
+        sector = ""
+        text_sections = scraper_data.get("text_sections", {})
+        if text_sections and "company_info" in text_sections:
+            # Try to extract sector from company info text
+            # Format is often "Sector: XYZ" in the company info
+            company_info = text_sections["company_info"]
+            import re
+            sector_match = re.search(r'Sector[:\s]+([A-Za-z\s&]+?)(?:\s+\||$)', company_info)
+            if sector_match:
+                sector = sector_match.group(1).strip()
+                logger.info(f"Extracted sector from Screener: {sector}")
+
+        result = {
+            "status": "success",
+            "ticker": ticker,
+            "company_name": scraper_data.get("company", company_name),
+            "sector": sector,
+            "ratios": ratios,
+            "sector_benchmarks": {},
+            "strengths": [],
+            "concerns": [],
+            "valuation_summary": "",
+            "error": None,
+            "source": "india_financials",
+            "currency": currency,
+            "as_of": scraper_data.get("fetched_at")
+        }
+
+        # Try to get sector benchmarks if we have sector info
+        if sector:
+            try:
+                from backend.tools.financial_tools import get_sector_median
+                benchmark_data = get_sector_median.func(sector)
+                if "error" not in benchmark_data:
+                    result["sector_benchmarks"] = benchmark_data.get("medians", {})
+                    logger.info(f"Fetched sector benchmarks for {sector}")
+            except Exception as e:
+                logger.warning(f"Could not fetch sector benchmarks: {e}")
+
+        # Analyze strengths and concerns
+        strengths, concerns = _analyze_ratios(ratios, result["sector_benchmarks"])
+        result["strengths"] = strengths
+        result["concerns"] = concerns
+
+        # Generate valuation summary
+        result["valuation_summary"] = _generate_valuation_summary(
+            ratios, result["sector_benchmarks"], company_name
+        )
+
+        return result
+
+    except Exception as e:
+        logger.error(f"india_financials fallback failed for {ticker}: {e}", exc_info=True)
+        return None
+
+
+def _parse_india_financials_ratios(ratios_table: list) -> Dict[str, Any]:
+    """
+    Parse ratios from india_financials Screener ratios table.
+
+    Args:
+        ratios_table: List of dicts from S_Ratios table
+
+    Returns:
+        Dict with extracted ratios
+    """
+    ratios = {}
+
+    # Convert to lookup
+    rows = {row.get("Item", ""): row for row in ratios_table}
+
+    def get_latest(item_name):
+        """Get latest value from rightmost column."""
+        row = rows.get(item_name)
+        if not row:
+            return None
+        # Get last non-Item column
+        cols = [k for k in row.keys() if k != "Item"]
+        if not cols:
+            return None
+        latest_col = cols[-1]
+        val = row.get(latest_col)
+        if val and val != "-":
+            try:
+                cleaned = str(val).replace(",", "").replace("%", "")
+                return float(cleaned)
+            except:
+                return None
+        return None
+
+    # Map Screener items to our format
+    ratios["pe_ratio"] = get_latest("Stock P/E")
+    ratios["pb_ratio"] = get_latest("Price to book value")
+    ratios["dividend_yield_pct"] = get_latest("Dividend yield %")
+    ratios["roe_pct"] = get_latest("ROCE %") or get_latest("ROE %")
+    ratios["roa_pct"] = get_latest("ROA %")
+    ratios["debt_to_equity"] = get_latest("Debt to equity")
+    ratios["operating_margins_pct"] = get_latest("OPM %")
+    ratios["profit_margins_pct"] = get_latest("Net Profit Margin %")
+    ratios["current_ratio"] = get_latest("Current ratio")
+    ratios["eps"] = get_latest("EPS in Rs")
+
+    # Market cap (often in Cr)
+    market_cap_cr = get_latest("Market Cap")
+    if market_cap_cr:
+        ratios["market_cap_cr"] = market_cap_cr
+
+    # Revenue and net income (often in Cr)
+    revenue_cr = get_latest("Sales") or get_latest("Revenue")
+    if revenue_cr:
+        ratios["revenue_cr"] = revenue_cr
+
+    net_income_cr = get_latest("Net Profit")
+    if net_income_cr:
+        ratios["net_income_cr"] = net_income_cr
+
+    # Price data
+    current_price = get_latest("Current Price") or get_latest("Price")
+    if current_price:
+        ratios["current_price"] = current_price
+
+    ratios["52w_high"] = get_latest("52W High") or get_latest("High")
+    ratios["52w_low"] = get_latest("52W Low") or get_latest("Low")
+
+    # Filter out None values
+    return {k: v for k, v in ratios.items() if v is not None}

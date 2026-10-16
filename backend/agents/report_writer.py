@@ -11,7 +11,7 @@ import re
 import os
 from typing import Dict, Any, Optional, List
 
-from langchain_google_genai import ChatGoogleGenerativeAI
+from backend.llm import get_llm
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -363,19 +363,7 @@ Return ONLY the JSON object, no markdown code fences or additional text."""
 
     # Call LLM
     try:
-        google_api_key = os.getenv("GOOGLE_API_KEY")
-        if not google_api_key:
-            raise ValueError("GOOGLE_API_KEY environment variable not set")
-
-        # Use configurable model (defaults to gemini-2.5-flash for free tier)
-        model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-
-        llm = ChatGoogleGenerativeAI(
-            model=model_name,
-            temperature=0,
-            timeout=120,
-            google_api_key=google_api_key
-        )
+        llm = get_llm(temperature=0)
 
         logger.info("Calling LLM for report generation")
         response = llm.invoke(prompt)
