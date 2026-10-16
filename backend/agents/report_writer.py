@@ -41,7 +41,7 @@ def run_report_writer(
 
     Returns:
         Dict with keys:
-        - status: "success", "partial_success", or "error"
+        - status: "ok", "partial", or "error"
         - ticker: Stock ticker
         - company_name: Company name
         - report_markdown: Full markdown report
@@ -117,10 +117,10 @@ def run_report_writer(
 
                 # Set status
                 if missing_sections:
-                    result["status"] = "partial_success"
+                    result["status"] = "partial"
                     result["error"] = f"Report generated with limited data: missing {', '.join(missing_sections)}"
                 else:
-                    result["status"] = "success"
+                    result["status"] = "ok"
 
                 logger.info(f"Report generated successfully (confidence: {result['confidence_score']})")
             else:
@@ -133,7 +133,7 @@ def run_report_writer(
                 )
 
                 result.update(fallback_report)
-                result["status"] = "partial_success"
+                result["status"] = "partial"
                 result["error"] = "LLM synthesis failed, using structured data fallback"
 
         except Exception as e:
@@ -147,7 +147,7 @@ def run_report_writer(
             )
 
             result.update(fallback_report)
-            result["status"] = "partial_success"
+            result["status"] = "partial"
             result["error"] = f"Report synthesis error: {str(e)}, using fallback"
 
     except Exception as e:
@@ -174,35 +174,64 @@ def _assess_data_quality(
     sources_used = []
     missing_sections = []
 
+    def _has_usable_data(output: Optional[Dict], content_key: str = None) -> bool:
+        """Check if agent output has usable data."""
+        if not output:
+            return False
+        status = output.get("status")
+        # Accept ok, partial, partial_success statuses
+        if status not in ["ok", "partial", "partial_success", "success"]:
+            return False
+        # If content_key specified, check it has non-empty data
+        if content_key:
+            content = output.get(content_key)
+            if isinstance(content, dict):
+                return bool(content)
+            elif isinstance(content, list):
+                return len(content) > 0
+            elif isinstance(content, str):
+                return bool(content.strip())
+        return True
+
     # Check filing data
-    if filing_output and filing_output.get("status") == "success":
+    if _has_usable_data(filing_output, "key_points"):
         sources_used.append("filing_analysis")
     else:
         missing_sections.append("filing_analysis")
+        if filing_output:
+            missing_sections[-1] += f" ({filing_output.get('error', 'no data')})"
 
     # Check ratio data
-    if ratio_output and ratio_output.get("status") == "success":
+    if _has_usable_data(ratio_output, "ratios"):
         sources_used.append("ratio_analysis")
     else:
         missing_sections.append("ratio_analysis")
+        if ratio_output:
+            missing_sections[-1] += f" ({ratio_output.get('error', 'no data')})"
 
     # Check news data
-    if news_output and news_output.get("status") in ["success", "partial_success"]:
+    if _has_usable_data(news_output, "story_groups"):
         sources_used.append("news_sentiment")
     else:
         missing_sections.append("news_sentiment")
+        if news_output:
+            missing_sections[-1] += f" ({news_output.get('error', 'no data')})"
 
     # Check technical data
-    if technical_output and technical_output.get("status") == "success":
+    if _has_usable_data(technical_output, "indicators"):
         sources_used.append("technical_analysis")
     else:
         missing_sections.append("technical_analysis")
+        if technical_output:
+            missing_sections[-1] += f" ({technical_output.get('error', 'no data')})"
 
     # Check risk data
-    if risk_output and risk_output.get("status") in ["success", "partial_success"]:
+    if _has_usable_data(risk_output, "metrics"):
         sources_used.append("risk_assessment")
     else:
         missing_sections.append("risk_assessment")
+        if risk_output:
+            missing_sections[-1] += f" ({risk_output.get('error', 'no data')})"
 
     # Build data quality summary
     total = len(sources_used) + len(missing_sections)
@@ -250,7 +279,7 @@ def _build_context(
         context_parts.append("")
 
     # News sentiment
-    if news_output and news_output.get("status") in ["success", "partial_success"]:
+    if news_output and news_output.get("status") in ["ok", "partial", "success", "partial_success"]:
         context_parts.append("=== NEWS SENTIMENT ===")
         context_parts.append(f"Sentiment: {news_output.get('sentiment')} (score: {news_output.get('sentiment_score')})")
         context_parts.append(f"Articles analyzed: {news_output.get('article_count')}")
@@ -298,7 +327,7 @@ def _build_context(
         context_parts.append("")
 
     # Risk assessment
-    if risk_output and risk_output.get("status") in ["success", "partial_success"]:
+    if risk_output and risk_output.get("status") in ["ok", "partial", "success", "partial_success"]:
         context_parts.append("=== RISK ASSESSMENT ===")
         context_parts.append(f"Risk level: {risk_output.get('risk_level')} (score: {risk_output.get('risk_score')}/100)")
         metrics = risk_output.get("metrics", {})
@@ -451,7 +480,7 @@ def _create_fallback_report(
         sections.append("")
 
     # News sentiment
-    if news_output and news_output.get("status") in ["success", "partial_success"]:
+    if news_output and news_output.get("status") in ["ok", "partial", "success", "partial_success"]:
         sections.append("## Market Sentiment")
         sections.append(f"- **Sentiment**: {news_output.get('sentiment')} (score: {news_output.get('sentiment_score')})")
         sections.append(f"- **Articles Analyzed**: {news_output.get('article_count')}")
@@ -468,7 +497,7 @@ def _create_fallback_report(
         sections.append("")
 
     # Risk assessment
-    if risk_output and risk_output.get("status") in ["success", "partial_success"]:
+    if risk_output and risk_output.get("status") in ["ok", "partial", "success", "partial_success"]:
         sections.append("## Risk Assessment")
         sections.append(f"- **Risk Level**: {risk_output.get('risk_level')}")
         sections.append(f"- **Risk Score**: {risk_output.get('risk_score')}/100")

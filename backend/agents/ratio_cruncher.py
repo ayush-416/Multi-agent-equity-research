@@ -34,7 +34,7 @@ def run_ratio_cruncher(
 
     Returns:
         Dict with keys:
-        - status: "success", "partial_success", or "error"
+        - status: "ok", "partial", "no_data", or "error"
         - ticker: Stock ticker
         - company_name: Company name
         - sector: Company sector
@@ -175,10 +175,10 @@ def run_ratio_cruncher(
         # Set final status (preserve "partial" if already set)
         if result["status"] != "partial":
             if sector_benchmarks:
-                result["status"] = "success"
+                result["status"] = "ok"
                 logger.info(f"Ratio analysis completed successfully for {ticker}")
             else:
-                result["status"] = "partial_success"
+                result["status"] = "partial"
                 if not result.get("error"):
                     result["error"] = "Sector benchmarks unavailable"
                 logger.info(f"Ratio analysis completed with partial success (no sector benchmarks)")
@@ -442,7 +442,7 @@ def _try_india_financials_fallback(ticker: str, company_name: str) -> Optional[D
                 logger.info(f"Extracted sector from Screener: {sector}")
 
         result = {
-            "status": "success",
+            "status": "ok",
             "ticker": ticker,
             "company_name": scraper_data.get("company", company_name),
             "sector": sector,

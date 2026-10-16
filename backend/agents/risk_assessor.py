@@ -50,7 +50,7 @@ def run_risk_assessor(
 
     Returns:
         Dict with keys:
-        - status: "success", "partial_success", or "error"
+        - status: "ok", "partial", "no_data", or "error"
         - ticker: Stock ticker
         - company_name: Company name
         - risk_score: Overall risk score (0-100, higher = higher risk)
@@ -329,10 +329,10 @@ def run_risk_assessor(
             result["error"] = f"Limited risk metrics: only {available_metrics} available. Need price and fundamental data."
             logger.warning(f"Risk assessment has limited data: {available_metrics} metrics")
         elif has_price_data and has_stock_info:
-            result["status"] = "success"
+            result["status"] = "ok"
             logger.info(f"Risk assessment completed: {result['risk_level']} ({risk_score:.0f}/100)")
         else:
-            result["status"] = "partial_success"
+            result["status"] = "partial"
             result["error"] = f"Some data sources unavailable: price_data={has_price_data}, stock_info={has_stock_info}"
             logger.info("Risk assessment completed with partial data")
 

@@ -29,7 +29,7 @@ def run_filing_analyst(ticker: str, company_name: str) -> Dict[str, Any]:
 
     Returns:
         Dict with keys:
-        - status: "success", "partial_success", or "error"
+        - status: "ok", "partial", "no_data", or "error"
         - ticker: Stock ticker
         - company_name: Company name
         - filing_summary: Brief summary of filing analysis
@@ -166,7 +166,7 @@ Return ONLY the JSON object, no markdown code fences or additional text."""
                 result["key_points"] = analysis.get("key_points", [])
                 result["risks"] = analysis.get("risks", [])
                 result["outlook"] = analysis.get("outlook", "")
-                result["status"] = "success"
+                result["status"] = "ok"
 
                 logger.info(f"Filing analysis completed successfully for {ticker}")
 
@@ -174,7 +174,7 @@ Return ONLY the JSON object, no markdown code fences or additional text."""
                 logger.error(f"Failed to parse LLM JSON response: {e}")
                 logger.error(f"Response text: {response_text[:500]}")
 
-                result["status"] = "partial_success"
+                result["status"] = "partial"
                 result["filing_summary"] = f"Analysis completed but response formatting issue"
                 result["error"] = f"JSON parse error: {str(e)}"
 
@@ -185,7 +185,7 @@ Return ONLY the JSON object, no markdown code fences or additional text."""
 
         except Exception as e:
             logger.error(f"LLM call failed: {e}", exc_info=True)
-            result["status"] = "partial_success"
+            result["status"] = "partial"
             result["filing_summary"] = f"Retrieved {len(all_contexts)} filing excerpts"
             result["error"] = f"LLM analysis failed: {str(e)}"
             result["key_points"] = [

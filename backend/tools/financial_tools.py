@@ -17,6 +17,10 @@ from backend.utils.cache import cache_get, cache_set
 from backend.utils.yfinance_disk_cache import get_cached_data, set_cached_data
 from backend.utils.validators import normalize_ticker, add_ns_suffix
 
+# Apply jugaad-data Windows patch on import
+from backend.utils.jugaad_patch import apply_jugaad_patch
+apply_jugaad_patch()
+
 logger = logging.getLogger(__name__)
 
 # Note: Custom curl_cffi session removed - vanilla yfinance works reliably
@@ -516,9 +520,10 @@ def get_price_history(ticker: str, period: str = "1y") -> dict:
         fallback_result = _fetch_from_jugaad_fallback(ticker, period)
 
         if fallback_result:
-            # Cache the fallback result
+            # Cache the fallback result (both memory and disk)
             cache_set(cache_key, fallback_result)
             set_cached_data("price_history", ticker, fallback_result, period)
+            logger.info(f"Cached fallback price history for {ticker}")
             return fallback_result
 
         # Both sources failed
@@ -597,10 +602,10 @@ def get_nifty_history(period: str = "1y") -> dict:
                 "source": "jugaad-data"
             }
 
-            # Cache the fallback result
+            # Cache the fallback result (both memory and disk)
             cache_set(cache_key, result)
             set_cached_data("nifty_history", "NSEI", result, period)
-            logger.info(f"jugaad-data Nifty fallback successful: {len(df)} data points")
+            logger.info(f"jugaad-data Nifty fallback successful: {len(df)} data points, cached to disk")
             return result
 
         except Exception as fallback_error:

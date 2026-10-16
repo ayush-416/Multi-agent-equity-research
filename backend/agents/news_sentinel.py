@@ -50,7 +50,7 @@ def run_news_sentinel(
 
     Returns:
         Dict with keys:
-        - status: "success", "partial_success", "no_data", or "error"
+        - status: "ok", "partial", "no_data", or "error"
         - ticker: Stock ticker
         - company_name: Company name
         - article_count: Total number of articles fetched
@@ -138,7 +138,7 @@ def run_news_sentinel(
 
         if not articles_filtered:
             logger.warning(f"No articles within {days_back} day window")
-            result["status"] = "partial_success"
+            result["status"] = "partial"
             result["article_count"] = len(articles)
             result["error"] = f"No articles within {days_back} day window"
             return result
@@ -153,7 +153,7 @@ def run_news_sentinel(
 
             if not articles_trusted:
                 logger.warning("No articles from trusted sources")
-                result["status"] = "partial_success"
+                result["status"] = "partial"
                 result["article_count"] = len(articles)
                 result["error"] = "No articles from trusted sources in the date window"
                 return result
@@ -220,23 +220,34 @@ def run_news_sentinel(
         logger.info(f"Analysis complete: {result['confirmed_count']} confirmed, {result['unconfirmed_count']} unconfirmed")
 
         # Compute aggregate metrics from CONFIRMED stories only
-        confirmed_groups = [g for g in analyzed_groups_sorted if g.get("confirmed")]
+        # Wrap in try/except to ensure we always return analyzed stories even if post-processing fails
+        try:
+            confirmed_groups = [g for g in analyzed_groups_sorted if g.get("confirmed")]
+            unconfirmed_groups = [g for g in analyzed_groups_sorted if not g.get("confirmed")]
 
-        if confirmed_groups:
-            _compute_aggregates(result, confirmed_groups)
-            result["status"] = "success"
-        else:
-            logger.warning("No confirmed stories found")
-            result["status"] = "partial"
-            result["error"] = f"No confirmed stories - all from unverified sources or single-source reports ({len(unconfirmed_stories)} unconfirmed)"
+            if confirmed_groups:
+                _compute_aggregates(result, confirmed_groups)
+                result["status"] = "ok"
+            else:
+                logger.warning("No confirmed stories found")
+                result["status"] = "partial"
+                result["error"] = f"No confirmed stories - all from unverified sources or single-source reports ({len(unconfirmed_groups)} unconfirmed)"
 
-            # Still show unconfirmed stories but don't compute aggregates from them
-            # Aggregates remain at their default neutral values
+                # Still show unconfirmed stories but don't compute aggregates from them
+                # Aggregates remain at their default neutral values
 
-        # Save story IDs as seen (only if dedup was used)
-        if use_history_dedup and not disable_dedup:
-            new_seen_ids = [_story_id(article) for article in articles_new]
-            _save_seen_stories(ticker, seen_stories + new_seen_ids)
+            # Save story IDs as seen (only if dedup was used)
+            if use_history_dedup and not disable_dedup:
+                new_seen_ids = [_story_id(article) for article in articles_new]
+                _save_seen_stories(ticker, seen_stories + new_seen_ids)
+
+        except Exception as post_error:
+            logger.error(f"Post-processing error (stories still returned): {post_error}", exc_info=True)
+            # Ensure we still have a valid status
+            if result["status"] == "error":
+                result["status"] = "partial"
+            if not result.get("error"):
+                result["error"] = f"Post-processing issue: {str(post_error)}"
 
     except Exception as e:
         logger.error(f"News sentinel failed for {ticker}: {e}", exc_info=True)
